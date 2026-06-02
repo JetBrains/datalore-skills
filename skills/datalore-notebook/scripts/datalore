@@ -78,6 +78,7 @@ CONNECT_TIMEOUT_SECONDS = 20
 API_READ_TIMEOUT_SECONDS = 120
 TRANSFER_READ_TIMEOUT_SECONDS = 30 * 60
 SERVER_WAIT_GRACE_SECONDS = 60
+DOWNLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 VERBOSE = False
 
 
@@ -367,19 +368,19 @@ def format_api_error(prefix, status, body):
 def api_request(session, endpoint, payload=None, raw=False, timeout=None):
     """Make an API request. Returns (http_status, parsed_body).
 
-    When *raw* is True the body is returned as bytes (for file downloads).
+    When *raw* is True the response stream is returned for file downloads.
     """
     url = f"{session.base_url}{endpoint}"
     log_http_request("POST", url, json_body=payload)
     timeout = timeout or default_request_timeout()
 
     try:
-        response = requests.post(url, headers=auth_headers(session), json=payload, timeout=timeout)
+        response = requests.post(url, headers=auth_headers(session), json=payload, timeout=timeout, stream=raw)
     except requests.RequestException as e:
         return 0, str(e)
 
     if raw and response.status_code < 400:
-        return response.status_code, response.content
+        return response.status_code, response
 
     body = parse_response_body(response)
     if response.status_code < 400 and isinstance(body, str):
@@ -1101,7 +1102,13 @@ def cmd_file_read(args):
         sys.exit(f"Failed to read file {args.path}: {body}")
     if status >= 400:
         sys.exit(format_api_error(f"Failed to read file {args.path}", status, body))
-    sys.stdout.buffer.write(body)
+    try:
+        with body:
+            for chunk in body.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
+                if chunk:
+                    sys.stdout.buffer.write(chunk)
+    except requests.RequestException as e:
+        sys.exit(f"Failed to read file {args.path}: {e}")
 
 
 def cmd_file_text(args):
