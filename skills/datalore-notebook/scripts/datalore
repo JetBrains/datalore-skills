@@ -134,8 +134,15 @@ def notebook_credentials_key(host, owner_id, notebook_id):
     return f"{host}/notebook/{owner_id}/{notebook_id}/api_token"
 
 
-def prompt_credentials(host, owner_id, notebook_id):
+def prompt_credentials(host, owner_id, notebook_id, reason=None):
     if not sys.stdin.isatty():
+        if reason:
+            sys.exit(
+                f"{reason}, and this is a non-interactive session so a replacement "
+                f"token cannot be prompted for.\n"
+                f"Set {ENV_API_TOKEN}, or run `datalore init <notebook-url>` from an "
+                f"interactive terminal to save a new token to the keychain."
+            )
         sys.exit(
             f"No {ENV_API_TOKEN} set and no saved credentials, and this is a "
             f"non-interactive session so a token cannot be prompted for.\n"
@@ -178,17 +185,17 @@ def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token
     if explicit_api_token is not None:
         if get_env_api_token():
             reject_api_token_stdin_env_conflict()
-        return explicit_api_token, True
+        return explicit_api_token, True, False
 
     env_api_token = get_env_api_token()
     if env_api_token:
-        return env_api_token, False
+        return env_api_token, False, False
 
     api_token = get_keychain_credentials(host, owner_id, notebook_id)
     if api_token:
-        return api_token, False
+        return api_token, False, True
 
-    return prompt_credentials(host, owner_id, notebook_id), True
+    return prompt_credentials(host, owner_id, notebook_id), True, False
 
 
 # --------------------------------------------------------------------------- #
@@ -596,10 +603,31 @@ def cmd_init(args):
     if args.api_token_stdin and get_env_api_token():
         reject_api_token_stdin_env_conflict()
     explicit_api_token = read_api_token_from_stdin() if args.api_token_stdin else None
-    api_token, should_save_credentials = resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token)
+    api_token, should_save_credentials, can_renew_keychain_token = resolve_credentials_for_init(
+        host,
+        owner_id,
+        notebook_id,
+        explicit_api_token,
+    )
 
     session = Session(host, owner_id, notebook_id, api_token, scheme)
-    api_post(session, "/cells", {"notebookId": session.notebook_id_dict()})
+    payload = {"notebookId": session.notebook_id_dict()}
+    status, body = api_request(session, "/cells", payload)
+    if status == 401 and can_renew_keychain_token:
+        print("\n  Saved API token is invalid or expired. Enter a replacement token.\n", file=sys.stderr)
+        api_token = prompt_credentials(
+            host,
+            owner_id,
+            notebook_id,
+            "Saved API token is invalid or expired",
+        )
+        should_save_credentials = True
+        session = Session(host, owner_id, notebook_id, api_token, scheme)
+        status, body = api_request(session, "/cells", payload)
+    if status == 0:
+        sys.exit(f"API request failed: {body}")
+    if status >= 400:
+        sys.exit(format_api_error("API error", status, body))
 
     if should_save_credentials:
         save_credentials(host, owner_id, notebook_id, api_token)
