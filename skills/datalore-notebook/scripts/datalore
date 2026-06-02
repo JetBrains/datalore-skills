@@ -1,0 +1,1654 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = ["keyring==25.7.0", "requests>=2.32,<3"]
+# ///
+"""
+Datalore notebook CLI — manage cells, files, and databases from the command line.
+
+Session management:
+  datalore init <notebook-url>     Parse URL, verify auth, save session
+
+Cell operations:
+  datalore cells [--full]          List all cells
+  datalore cells run <ids...>      Execute cells in order
+  datalore cell get <id>           Get cell with status and outputs
+  datalore cell create [flags]     Create cell (source from stdin)
+  datalore cell edit <id> [flags]  Edit cell (new source from stdin)
+  datalore cell run <id> [--wait]  Execute a cell
+  datalore cell outputs <id>       Get cell outputs
+  datalore cell delete <id>        Delete a cell
+  datalore cell update-control <id> Update a control cell
+
+File operations:
+  datalore files [--directory D]   List files
+  datalore file read <path>        Download file to stdout
+  datalore file text <path>        Read a text preview
+  datalore file upload <local>     Upload file
+  datalore file delete <path>      Delete file
+  datalore file exists <path>      Check file existence
+
+Database operations:
+  datalore databases               List attached databases
+  datalore db schema <id>          Browse schema tree
+  datalore db condensed <id>       Print compact schema text
+  datalore db search <id> <query>  Search schema by name
+
+Kernel operations:
+  datalore kernel status           Check kernel state
+  datalore kernel restart          Restart kernel
+  datalore kernel interrupt        Interrupt execution
+
+Worksheet operations:
+  datalore worksheet create        Create a worksheet tab
+
+Code insight:
+  datalore definitions <id> <line> <column>
+
+Authentication uses a Datalore API token as a bearer token. Set
+`DATALORE_API_TOKEN` for keychain-free environments, or run
+`datalore init <url>` in a terminal to save notebook credentials interactively.
+"""
+
+import argparse
+import getpass
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+
+# --------------------------------------------------------------------------- #
+# Constants
+# --------------------------------------------------------------------------- #
+
+SERVICE = "datalore-notebook"
+SESSION_FILE = ".datalore-session"
+ENV_API_TOKEN = "DATALORE_API_TOKEN"
+TERMINAL_STATUSES = {"VALID", "ERROR", "WARNING"}
+CREATE_RUNNABLE_CELL_TYPES = {"CODE", "SQL", "CONTROL"}
+EDIT_RUNNABLE_CELL_TYPES = {"CODE", "SQL"}
+DEFAULT_TIMEOUT = 120
+MAX_API_TIMEOUT_MS = 30000
+MAX_POLL_INTERVAL = 3.0
+CONNECT_TIMEOUT_SECONDS = 20
+API_READ_TIMEOUT_SECONDS = 120
+TRANSFER_READ_TIMEOUT_SECONDS = 30 * 60
+SERVER_WAIT_GRACE_SECONDS = 60
+VERBOSE = False
+
+
+# --------------------------------------------------------------------------- #
+# Auth
+# --------------------------------------------------------------------------- #
+
+def read_api_token_from_stdin():
+    if sys.stdin.isatty():
+        sys.exit("--api-token-stdin was provided but stdin is empty.")
+    token = sys.stdin.read().strip()
+    if not token:
+        sys.exit("API token from stdin is empty.")
+    return token
+
+
+def get_env_api_token():
+    token = os.environ.get(ENV_API_TOKEN, "").strip()
+    return token or None
+
+
+def reject_api_token_stdin_env_conflict():
+    sys.exit(
+        f"--api-token-stdin cannot be used while {ENV_API_TOKEN} is set. "
+        f"Unset {ENV_API_TOKEN} first so the CLI can use and save the token from stdin."
+    )
+
+
+def exception_summary(error):
+    message = str(error).strip()
+    if message:
+        return f"{error.__class__.__name__}: {message}"
+    return error.__class__.__name__
+
+
+def fail_keychain(action, error):
+    sys.exit(
+        f"Cannot {action} system keychain credentials: {exception_summary(error)}\n"
+        f"Set {ENV_API_TOKEN} for keychain-free use, or fix keychain access and run "
+        f"`datalore init <notebook-url>` again."
+    )
+
+
+def require_keyring():
+    try:
+        import keyring
+    except Exception as e:
+        fail_keychain("load", e)
+
+    return keyring
+
+
+def notebook_credentials_key(host, owner_id, notebook_id):
+    return f"{host}/notebook/{owner_id}/{notebook_id}/api_token"
+
+
+def prompt_credentials(host, owner_id, notebook_id):
+    if not sys.stdin.isatty():
+        sys.exit(
+            f"No {ENV_API_TOKEN} set and no saved credentials, and this is a "
+            f"non-interactive session so a token cannot be prompted for.\n"
+            f"Set {ENV_API_TOKEN}, or run `datalore init <notebook-url>` from an "
+            f"interactive terminal to save a token to the keychain."
+        )
+    print(f"\n  Notebook: https://{host}/notebook/{owner_id}/{notebook_id}/\n")
+    print("  Datalore API token")
+    print("     Paste a token that can access this notebook.")
+    print("     It can be created in the Datalore Notebook UI under Tools > API Token.")
+    print()
+    api_token = getpass.getpass("  Paste API token: ").strip()
+    if not api_token:
+        sys.exit("API token is empty.")
+
+    return api_token
+
+
+def save_credentials(host, owner_id, notebook_id, api_token):
+    if get_env_api_token():
+        print(f"\n  {ENV_API_TOKEN} is set; system keychain was not updated.\n")
+        return
+    keyring = require_keyring()
+    try:
+        keyring.set_password(SERVICE, notebook_credentials_key(host, owner_id, notebook_id), api_token)
+    except Exception as e:
+        fail_keychain("save", e)
+    print("\n  Saved to system keychain.\n")
+
+
+def get_keychain_credentials(host, owner_id, notebook_id):
+    keyring = require_keyring()
+    try:
+        return keyring.get_password(SERVICE, notebook_credentials_key(host, owner_id, notebook_id))
+    except Exception as e:
+        fail_keychain("read", e)
+
+
+def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token=None):
+    if explicit_api_token is not None:
+        if get_env_api_token():
+            reject_api_token_stdin_env_conflict()
+        return explicit_api_token, True
+
+    env_api_token = get_env_api_token()
+    if env_api_token:
+        return env_api_token, False
+
+    api_token = get_keychain_credentials(host, owner_id, notebook_id)
+    if api_token:
+        return api_token, False
+
+    return prompt_credentials(host, owner_id, notebook_id), True
+
+
+# --------------------------------------------------------------------------- #
+# Session management
+# --------------------------------------------------------------------------- #
+
+class Session:
+    __slots__ = ("host", "scheme", "owner_id", "notebook_id", "base_url", "token")
+
+    def __init__(self, host, owner_id, notebook_id, token="", scheme="https"):
+        self.host = host
+        self.scheme = scheme
+        self.owner_id = owner_id
+        self.notebook_id = notebook_id
+        self.base_url = f"{scheme}://{host}/api/notebook/v1"
+        self.token = token
+
+    def notebook_id_dict(self):
+        return {"ownerId": self.owner_id, "id": self.notebook_id}
+
+
+# Regex handles both /notebook/owner/id and /notebook/owner/id/anything
+_URL_RE = re.compile(r"(https?)://([^/]+)/notebook/([^/]+)/([^/?#]+)")
+
+
+def parse_notebook_url(url):
+    """Extract (scheme, host, ownerId, notebookId) from a notebook URL."""
+    m = _URL_RE.search(url)
+    if not m:
+        sys.exit(f"Cannot parse notebook URL: {url}\n"
+                 f"Expected: https://<host>/notebook/<ownerId>/<notebookId>/...")
+    return m.group(1), m.group(2), m.group(3), m.group(4)
+
+
+def save_session(scheme, host, owner_id, notebook_id):
+    data = {"scheme": scheme, "host": host, "ownerId": owner_id, "notebookId": notebook_id}
+    try:
+        Path(SESSION_FILE).write_text(json.dumps(data, indent=2) + "\n")
+    except OSError as e:
+        sys.exit(f"Cannot write {SESSION_FILE}: {exception_summary(e)}")
+
+
+def load_session():
+    """Load session from .datalore-session and resolve credentials."""
+    path = Path(SESSION_FILE)
+    if not path.exists():
+        sys.exit(f"No {SESSION_FILE} found. Run `datalore init <notebook-url>` first.")
+    try:
+        data = json.loads(path.read_text())
+    except OSError as e:
+        sys.exit(f"Cannot read {SESSION_FILE}: {exception_summary(e)}")
+    except json.JSONDecodeError as e:
+        sys.exit(
+            f"Cannot parse {SESSION_FILE}: {exception_summary(e)}\n"
+            f"Run `datalore init <notebook-url>` again from this directory."
+        )
+    if not isinstance(data, dict):
+        sys.exit(
+            f"Invalid {SESSION_FILE}: expected a JSON object.\n"
+            f"Run `datalore init <notebook-url>` again from this directory."
+        )
+    missing_fields = [
+        field
+        for field in ("host", "ownerId", "notebookId")
+        if not isinstance(data.get(field), str) or not data.get(field)
+    ]
+    if missing_fields:
+        sys.exit(
+            f"Invalid {SESSION_FILE}: missing or invalid {', '.join(missing_fields)}.\n"
+            f"Run `datalore init <notebook-url>` again from this directory."
+        )
+    scheme = data.get("scheme", "https")
+    if not isinstance(scheme, str) or scheme not in ("http", "https"):
+        sys.exit(
+            f"Invalid {SESSION_FILE}: scheme must be 'http' or 'https'.\n"
+            f"Run `datalore init <notebook-url>` again from this directory."
+        )
+    host = data["host"]
+    owner_id = data["ownerId"]
+    notebook_id = data["notebookId"]
+
+    token = get_env_api_token()
+    if not token:
+        token = get_keychain_credentials(host, owner_id, notebook_id)
+    if not token:
+        sys.exit(f"No credentials for this notebook. Set {ENV_API_TOKEN} or run `datalore init <notebook-url>` in a terminal.")
+
+    return Session(host, owner_id, notebook_id, token, scheme)
+
+
+# --------------------------------------------------------------------------- #
+# HTTP helpers
+# --------------------------------------------------------------------------- #
+
+def auth_headers(session):
+    return {"Authorization": f"Bearer {session.token}"}
+
+
+def log_http_request(method, url, *, params=None, json_body=None, files=None):
+    if not VERBOSE:
+        return
+    details = []
+    if params:
+        details.append(f"params={json.dumps(params, sort_keys=True)}")
+    if json_body is not None:
+        details.append(f"json={json.dumps(json_body, sort_keys=True)}")
+    if files:
+        details.append(f"files={','.join(files)}")
+    suffix = f" ({'; '.join(details)})" if details else ""
+    print(f"  {method} {url}{suffix}", file=sys.stderr)
+
+
+def request_timeout(read_timeout_seconds):
+    return (CONNECT_TIMEOUT_SECONDS, read_timeout_seconds)
+
+
+def default_request_timeout():
+    return request_timeout(API_READ_TIMEOUT_SECONDS)
+
+
+def transfer_request_timeout():
+    return request_timeout(TRANSFER_READ_TIMEOUT_SECONDS)
+
+
+def request_timeout_for_server_wait(wait_timeout_ms, operation_count=1):
+    read_timeout = (max(wait_timeout_ms, 0) * max(operation_count, 1) / 1000) + SERVER_WAIT_GRACE_SECONDS
+    return request_timeout(max(API_READ_TIMEOUT_SECONDS, read_timeout))
+
+
+def parse_response_body(response):
+    body_text = response.text
+    if response.status_code == 204 or not body_text.strip():
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        return body_text
+
+
+def body_error_message(body):
+    if isinstance(body, dict):
+        return body.get("error") or body.get("message") or json.dumps(body)
+    if isinstance(body, bytes):
+        return body.decode("utf-8", errors="replace")[:500]
+    if body is None:
+        return ""
+    return str(body)[:500]
+
+
+def format_api_error(prefix, status, body):
+    message = body_error_message(body)
+    if status == 401:
+        detail = f": {message}" if message else ""
+        return (
+            f"{prefix}: authentication failed (HTTP {status}){detail}\n"
+            f"The Datalore API token is missing, invalid, or expired. "
+            f"Check {ENV_API_TOKEN} or run `datalore init <notebook-url>` again from this directory."
+        )
+    if status == 403:
+        detail = f": {message}" if message else ""
+        return (
+            f"{prefix}: access denied (HTTP 403){detail}\n"
+            "The token is valid, but it does not have access to this notebook."
+        )
+    detail = f": {message}" if message else ""
+    return f"{prefix} (HTTP {status}){detail}"
+
+
+def api_request(session, endpoint, payload=None, raw=False, timeout=None):
+    """Make an API request. Returns (http_status, parsed_body).
+
+    When *raw* is True the body is returned as bytes (for file downloads).
+    """
+    url = f"{session.base_url}{endpoint}"
+    log_http_request("POST", url, json_body=payload)
+    timeout = timeout or default_request_timeout()
+
+    try:
+        response = requests.post(url, headers=auth_headers(session), json=payload, timeout=timeout)
+    except requests.RequestException as e:
+        return 0, str(e)
+
+    if raw and response.status_code < 400:
+        return response.status_code, response.content
+
+    body = parse_response_body(response)
+    if response.status_code < 400 and isinstance(body, str):
+        sys.exit(f"Unexpected response (HTTP {response.status_code}):\n{body[:500]}")
+    return response.status_code, body
+
+
+def api_post(session, endpoint, payload, timeout=None):
+    """POST with JSON payload; exit on error."""
+    status, body = api_request(session, endpoint, payload, timeout=timeout)
+    if status == 0:
+        sys.exit(f"API request failed: {body}")
+    if status >= 400:
+        sys.exit(format_api_error("API error", status, body))
+    return body
+
+
+def api_upload(session, endpoint, file_path, query_params, timeout=None):
+    """Multipart file upload."""
+    url = f"{session.base_url}{endpoint}"
+    log_http_request("POST", url, params=query_params, files=["file"])
+    timeout = timeout or transfer_request_timeout()
+    try:
+        with open(file_path, "rb") as f:
+            response = requests.post(
+                url,
+                headers=auth_headers(session),
+                params=query_params,
+                files={"file": (os.path.basename(file_path), f)},
+                timeout=timeout,
+            )
+    except requests.RequestException as e:
+        sys.exit(f"Upload failed: {e}")
+
+    body_text = response.text
+    if response.status_code >= 400:
+        sys.exit(format_api_error("Upload failed", response.status_code, parse_response_body(response)))
+    try:
+        return json.loads(body_text) if body_text.strip() else None
+    except json.JSONDecodeError:
+        return body_text
+
+
+def parse_json_argument(value, argument_name):
+    """Parse inline JSON, @file JSON, or '-' JSON from stdin."""
+    if value == "-":
+        text = sys.stdin.read()
+    elif value.startswith("@"):
+        text = Path(value[1:]).read_text()
+    else:
+        text = value
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        sys.exit(f"Invalid JSON for {argument_name}: {e}")
+    if not isinstance(parsed, dict):
+        sys.exit(f"{argument_name} must be a JSON object.")
+    return parsed
+
+
+def print_json(body):
+    print(json.dumps(body, indent=2))
+
+
+# --------------------------------------------------------------------------- #
+# Formatting helpers
+# --------------------------------------------------------------------------- #
+
+def format_status(status):
+    return f"[{status}]"
+
+
+def format_cell_line(cell):
+    """One-line summary: position cellId type first_line."""
+    pos = cell.get("position", "?")
+    cid = cell.get("cellId", "?")
+    ctype = cell.get("cellType", "?")
+    source = cell.get("source", "") or ""
+    first_line = source.split("\n", 1)[0]
+    if len(first_line) > 70:
+        first_line = first_line[:67] + "..."
+    return f"  {pos:>3}  {cid:<10} {ctype:<10} {first_line}"
+
+
+def format_outputs(data):
+    """Format cell outputs/run result for human display."""
+    parts = []
+    stream_texts = set()
+
+    status = data.get("executionStatus", "")
+    count = data.get("executionCount", "")
+    if status:
+        parts.append(f"{format_status(status)} execution #{count}")
+
+    stdout = data.get("stdout")
+    if stdout:
+        text = stdout.rstrip("\n")
+        parts.append(text)
+        stream_texts.add(text)
+        if data.get("stdoutTruncated"):
+            parts.append("[stdout truncated]")
+
+    stderr = data.get("stderr")
+    if stderr:
+        text = stderr.rstrip("\n")
+        parts.append(f"STDERR: {text}")
+        stream_texts.add(text)
+        if data.get("stderrTruncated"):
+            parts.append("[stderr truncated]")
+
+    error_msg = data.get("errorMessage")
+    error_tb = data.get("errorTraceback")
+    if error_msg:
+        parts.append(f"Error: {error_msg}")
+    if error_tb:
+        parts.append(error_tb.rstrip("\n"))
+        if data.get("errorTracebackTruncated"):
+            parts.append("[traceback truncated]")
+
+    outputs = data.get("outputs") or []
+    plot_count = 0
+    for out in outputs:
+        otype = out.get("outputType", "")
+        text = out.get("text")
+        if otype in ("TEXT", "LAST_EXPRESSION"):
+            if text:
+                rendered = text.rstrip("\n")
+                if rendered not in stream_texts:
+                    parts.append(rendered)
+        elif otype in ("MARKDOWN", "LATEX", "TSV"):
+            if text:
+                parts.append(text.rstrip("\n"))
+        elif otype == "TABLE":
+            if text:
+                # Strip HTML tags for a rough text rendering
+                clean = re.sub(r"<[^>]+>", " ", text)
+                clean = re.sub(r"\s+", " ", clean).strip()
+                if len(clean) > 2000:
+                    clean = clean[:2000] + "... (truncated)"
+                parts.append(clean)
+        elif otype == "HTML":
+            if text:
+                clean = re.sub(r"<[^>]+>", " ", text)
+                clean = re.sub(r"\s+", " ", clean).strip()
+                if len(clean) > 2000:
+                    clean = clean[:2000] + "... (truncated)"
+                parts.append(clean)
+        elif otype in ("PLOT", "SVG", "PLOTLY", "VEGA"):
+            plot_count += 1
+        elif text:
+            parts.append(text.rstrip("\n"))
+
+    if plot_count:
+        parts.append(f"[{plot_count} plot output{'s' if plot_count > 1 else ''}]")
+
+    return "\n".join(parts)
+
+
+def format_run_result(result):
+    """Format a runResult (from create/edit/run)."""
+    if result is None:
+        return ""
+    return format_outputs(result)
+
+
+# --------------------------------------------------------------------------- #
+# Wait / polling
+# --------------------------------------------------------------------------- #
+
+def is_terminal(status):
+    return status in TERMINAL_STATUSES
+
+
+def wait_for_completion(session, cell_id, timeout):
+    """Poll /cell/outputs until a terminal status or timeout."""
+    payload = {"notebookId": session.notebook_id_dict(), "cellId": cell_id}
+    deadline = time.monotonic() + timeout
+    interval = 0.5
+
+    while time.monotonic() < deadline:
+        time.sleep(interval)
+        elapsed = time.monotonic() + timeout - deadline
+        print(f"  Waiting for cell {cell_id}... [{elapsed:.1f}s]", file=sys.stderr, end="\r")
+        body = api_post(session, "/cell/outputs", payload)
+        status = body.get("executionStatus", "")
+        if is_terminal(status):
+            print(file=sys.stderr)  # clear the waiting line
+            return body
+        interval = min(interval * 2, MAX_POLL_INTERVAL)
+
+    print(file=sys.stderr)
+    return None  # timeout
+
+
+def api_wait_timeout_ms(timeout_s):
+    return min(max(int(timeout_s), 0) * 1000, MAX_API_TIMEOUT_MS)
+
+
+# --------------------------------------------------------------------------- #
+# Stdin handling
+# --------------------------------------------------------------------------- #
+
+def read_source(args_source=None):
+    """Read cell source from --source flag or stdin.
+
+    --source takes priority over stdin when both are available.
+    """
+    if args_source is not None:
+        return args_source
+    if sys.stdin.isatty():
+        return None
+    return sys.stdin.read()
+
+
+# --------------------------------------------------------------------------- #
+# Command handlers
+# --------------------------------------------------------------------------- #
+
+def cmd_init(args):
+    scheme, host, owner_id, notebook_id = parse_notebook_url(args.url)
+    if args.api_token_stdin and get_env_api_token():
+        reject_api_token_stdin_env_conflict()
+    explicit_api_token = read_api_token_from_stdin() if args.api_token_stdin else None
+    api_token, should_save_credentials = resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token)
+
+    session = Session(host, owner_id, notebook_id, api_token, scheme)
+    api_post(session, "/cells", {"notebookId": session.notebook_id_dict()})
+
+    if should_save_credentials:
+        save_credentials(host, owner_id, notebook_id, api_token)
+
+    save_session(scheme, host, owner_id, notebook_id)
+    print(f"Session saved for notebook {notebook_id} on {host}")
+    print(f"  Owner:    {owner_id}")
+    print(f"  Notebook: {notebook_id}")
+    print(f"  File:     {SESSION_FILE}")
+
+def cmd_cells(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    if args.worksheet_index is not None:
+        payload["worksheetIndex"] = args.worksheet_index
+    if args.include_outputs:
+        payload["includeOutputs"] = True
+    body = api_post(session, "/cells", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    cells = body.get("cellsWithOutputs") if args.include_outputs else body.get("cells")
+    cells = cells or []
+    if not cells:
+        print("No cells in notebook.")
+        return
+
+    for cell in cells:
+        print(format_cell_line(cell))
+        if args.include_outputs:
+            status = cell.get("executionStatus")
+            if status:
+                print(f"       status: {format_status(status)} #{cell.get('executionCount', '')}")
+        if args.full:
+            source = cell.get("source", "") or ""
+            for line in source.split("\n"):
+                print(f"         | {line}")
+            if args.include_outputs:
+                output_text = format_outputs(cell)
+                if output_text:
+                    print("       outputs:")
+                    for line in output_text.split("\n"):
+                        print(f"         > {line}")
+            print()
+
+    if body.get("outputsTruncated"):
+        print(
+            f"Outputs truncated from cell {body.get('outputsTruncatedFromCellId')}. "
+            "Use `datalore cell outputs <id>` for full output.",
+            file=sys.stderr,
+        )
+
+
+def cmd_cells_run(args):
+    session = load_session()
+    timeout_ms = args.timeout_ms
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellIds": args.cell_ids,
+    }
+    if args.stop_on_error is not None:
+        payload["stopOnError"] = args.stop_on_error
+    if timeout_ms is not None:
+        payload["timeoutMs"] = timeout_ms
+
+    body = api_post(
+        session,
+        "/cells/run",
+        payload,
+        timeout=request_timeout_for_server_wait(timeout_ms, len(args.cell_ids)) if timeout_ms is not None else None,
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    exit_code = 0
+    for result in body.get("results", []):
+        cell_id = result.get("cellId", "?")
+        status = result.get("executionStatus", "")
+        print(f"Cell {cell_id}: {format_status(status)}")
+        output_text = format_outputs(result)
+        if output_text:
+            print(output_text)
+        if status == "ERROR":
+            exit_code = max(exit_code, 1)
+        elif status == "TIMEOUT":
+            exit_code = max(exit_code, 2)
+
+    if body.get("stopped"):
+        print(f"Stopped: {body.get('stoppedReason')}", file=sys.stderr)
+    if exit_code:
+        sys.exit(exit_code)
+
+
+def cmd_worksheet_create(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    if args.name:
+        payload["name"] = args.name
+    if args.worksheet_index is not None:
+        payload["worksheetIndex"] = args.worksheet_index
+
+    body = api_post(session, "/worksheet/create", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(
+        f"Created worksheet {body.get('worksheetId', '?')} "
+        f"at index {body.get('worksheetIndex', '?')}: {body.get('name', '?')}"
+    )
+    print(f"First cell: {body.get('firstCellId', '?')}")
+
+
+def cmd_cell_get(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
+    body = api_post(session, "/cell", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    cell = body.get("cell", body)
+    print(format_cell_line(cell))
+    output_text = format_outputs(cell)
+    if output_text:
+        print(output_text)
+
+
+def get_cell_type(session, cell_id):
+    payload = {"notebookId": session.notebook_id_dict(), "cellId": cell_id}
+    body = api_post(session, "/cell", payload)
+    cell = body.get("cell", body)
+    cell_type = cell.get("cellType")
+    if not cell_type:
+        sys.exit(f"Cannot determine cell type for {cell_id}.")
+    return cell_type
+
+
+def cmd_cell_create(args):
+    session = load_session()
+    stdin_used_for_json = args.data_json == "-" or args.control_json == "-"
+    source = getattr(args, "source", None) if stdin_used_for_json else read_source(getattr(args, "source", None))
+
+    cell_type = args.type
+    can_execute = cell_type in CREATE_RUNNABLE_CELL_TYPES
+    if args.run and not can_execute:
+        sys.exit(f"{cell_type} cells cannot be executed; omit --run.")
+    should_run = args.run or (args.wait and can_execute)
+
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellType": cell_type,
+    }
+    if source is not None:
+        payload["source"] = source
+
+    # Cell type-specific data
+    data = parse_json_argument(args.data_json, "--data-json") if args.data_json else {}
+    if args.control_json:
+        if data:
+            sys.exit("--data-json and --control-json are mutually exclusive.")
+        data = {"control": parse_json_argument(args.control_json, "--control-json")}
+
+    if cell_type == "CODE" and not data:
+        data["language"] = args.language
+    elif cell_type == "SQL" and not data:
+        if args.database_id:
+            data["databaseId"] = args.database_id
+        if args.variable_name:
+            data["variableName"] = args.variable_name
+    elif cell_type == "CONTROL" and not data:
+        sys.exit("CONTROL cells require --control-json or --data-json.")
+    if data:
+        payload["data"] = data
+
+    if args.after_cell_id:
+        payload["afterCellId"] = args.after_cell_id
+    if args.before_cell_id:
+        payload["beforeCellId"] = args.before_cell_id
+    if args.after_cell_id and args.before_cell_id:
+        sys.exit("--after and --before are mutually exclusive.")
+
+    if should_run:
+        payload["run"] = True
+        payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
+
+    body = api_post(
+        session,
+        "/cell/create",
+        payload,
+        timeout=request_timeout_for_server_wait(payload["timeoutMs"]) if should_run else None,
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    cell_id = body.get("cellId", "?")
+    print(f"Created cell {cell_id}")
+
+    run_result = body.get("runResult")
+    if run_result:
+        status = run_result.get("executionStatus", "")
+        output_text = format_run_result(run_result)
+        if output_text:
+            print(output_text)
+
+        if args.wait and not is_terminal(status):
+            result = wait_for_completion(session, cell_id, args.timeout)
+            if result is None:
+                print(f"Timeout waiting for cell {cell_id}", file=sys.stderr)
+                sys.exit(2)
+            print(format_outputs(result))
+            if result.get("executionStatus") == "ERROR":
+                sys.exit(1)
+        elif status == "ERROR":
+            sys.exit(1)
+    elif args.wait and should_run:
+        result = wait_for_completion(session, cell_id, args.timeout)
+        if result is None:
+            print(f"Timeout waiting for cell {cell_id}", file=sys.stderr)
+            sys.exit(2)
+        print(format_outputs(result))
+        if result.get("executionStatus") == "ERROR":
+            sys.exit(1)
+
+
+def cmd_cell_edit(args):
+    session = load_session()
+    if args.data_json == "-" and args.source is None:
+        sys.exit("--data-json - requires --source because stdin is used for JSON.")
+    source = read_source(getattr(args, "source", None))
+
+    if source is None:
+        sys.exit("No source provided. Pipe source via stdin or use --source.")
+
+    cell_type = get_cell_type(session, args.cell_id) if args.wait or args.run else None
+    can_execute = cell_type in EDIT_RUNNABLE_CELL_TYPES
+    if args.run and not can_execute:
+        sys.exit(f"{cell_type} cells cannot be executed; omit --run.")
+    should_run = args.run or (args.wait and can_execute)
+
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellId": args.cell_id,
+        "newContent": source,
+    }
+
+    data = parse_json_argument(args.data_json, "--data-json") if args.data_json else {}
+    if args.database_id:
+        data["databaseId"] = args.database_id
+    if args.variable_name:
+        data["variableName"] = args.variable_name
+    if data:
+        payload["data"] = data
+
+    if should_run:
+        payload["run"] = True
+        payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
+
+    body = api_post(
+        session,
+        "/cell/edit",
+        payload,
+        timeout=request_timeout_for_server_wait(payload["timeoutMs"]) if should_run else None,
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    cell_id = body.get("cellId", args.cell_id)
+    applied = body.get("applied", False)
+    print(f"Edited cell {cell_id} (applied: {applied})")
+
+    run_result = body.get("runResult")
+    if run_result:
+        status = run_result.get("executionStatus", "")
+        output_text = format_run_result(run_result)
+        if output_text:
+            print(output_text)
+
+        if args.wait and not is_terminal(status):
+            result = wait_for_completion(session, cell_id, args.timeout)
+            if result is None:
+                print(f"Timeout waiting for cell {cell_id}", file=sys.stderr)
+                sys.exit(2)
+            print(format_outputs(result))
+            if result.get("executionStatus") == "ERROR":
+                sys.exit(1)
+        elif status == "ERROR":
+            sys.exit(1)
+    elif args.wait and should_run:
+        result = wait_for_completion(session, cell_id, args.timeout)
+        if result is None:
+            print(f"Timeout waiting for cell {cell_id}", file=sys.stderr)
+            sys.exit(2)
+        print(format_outputs(result))
+        if result.get("executionStatus") == "ERROR":
+            sys.exit(1)
+
+
+def cmd_cell_run(args):
+    session = load_session()
+    timeout_ms = api_wait_timeout_ms(args.timeout)
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellId": args.cell_id,
+        "timeoutMs": timeout_ms,
+    }
+    body = api_post(session, "/cell/run", payload, timeout=request_timeout_for_server_wait(timeout_ms))
+
+    if args.json:
+        print_json(body)
+        return
+
+    status = body.get("executionStatus", "")
+    output_text = format_outputs(body)
+    if output_text:
+        print(output_text)
+
+    if args.wait and not is_terminal(status):
+        result = wait_for_completion(session, args.cell_id, args.timeout)
+        if result is None:
+            print(f"Timeout waiting for cell {args.cell_id}", file=sys.stderr)
+            sys.exit(2)
+        print(format_outputs(result))
+        if result.get("executionStatus") == "ERROR":
+            sys.exit(1)
+    elif status == "ERROR":
+        sys.exit(1)
+
+
+def cmd_cell_outputs(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
+    body = api_post(session, "/cell/outputs", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(format_outputs(body))
+
+
+def cmd_cell_delete(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
+    status, body = api_request(session, "/cell/delete", payload)
+    if status == 0:
+        sys.exit(f"Failed to delete cell: {body}")
+    if status >= 400:
+        sys.exit(format_api_error(f"Failed to delete cell {args.cell_id}", status, body))
+    if args.json:
+        print_json({"deleted": True, "cellId": args.cell_id})
+        return
+    print(f"Deleted cell {args.cell_id}")
+
+
+def cmd_cell_update_control(args):
+    session = load_session()
+    control = parse_json_argument(args.control_json, "--control-json")
+
+    if args.wait:
+        args.run = True
+
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellId": args.cell_id,
+        "control": control,
+    }
+    if args.run:
+        payload["run"] = True
+        payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
+
+    body = api_post(
+        session,
+        "/cell/controls/update",
+        payload,
+        timeout=request_timeout_for_server_wait(payload["timeoutMs"]) if args.run else None,
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(f"Updated controls for cell {body.get('cellId', args.cell_id)}")
+    run_result = body.get("runResult")
+    if run_result:
+        status = run_result.get("executionStatus", "")
+        output_text = format_run_result(run_result)
+        if output_text:
+            print(output_text)
+        if args.wait and not is_terminal(status):
+            result = wait_for_completion(session, args.cell_id, args.timeout)
+            if result is None:
+                print(f"Timeout waiting for cell {args.cell_id}", file=sys.stderr)
+                sys.exit(2)
+            print(format_outputs(result))
+            if result.get("executionStatus") == "ERROR":
+                sys.exit(1)
+        elif status == "ERROR":
+            sys.exit(1)
+
+
+def cmd_definitions(args):
+    session = load_session()
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "cellId": args.cell_id,
+        "line": args.line,
+        "column": args.column,
+    }
+    body = api_post(session, "/definitions", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    if not body.get("found"):
+        print("Definition not found.")
+        sys.exit(1)
+
+    location = []
+    if body.get("filePath"):
+        location.append(body["filePath"])
+    if body.get("cellId"):
+        location.append(f"cell {body['cellId']}")
+    if body.get("line") is not None and body.get("column") is not None:
+        location.append(f"{body['line']}:{body['column']}")
+    print("Definition: " + " ".join(location))
+
+
+def cmd_files(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    if args.directory:
+        payload["directory"] = args.directory
+    body = api_post(session, "/files", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    files = body.get("files", [])
+    if not files:
+        print("No files.")
+        return
+    for f in files:
+        ftype = f.get("type", "")
+        name = f.get("name", "")
+        size = f.get("fileSize", 0)
+        indicator = "/" if ftype == "FOLDER" else ""
+        if ftype == "FILE":
+            print(f"  {size:>10}  {name}")
+        else:
+            print(f"  {'<dir>':>10}  {name}/")
+
+
+def cmd_file_read(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
+    status, body = api_request(session, "/file", payload, raw=True, timeout=transfer_request_timeout())
+    if status == 0:
+        sys.exit(f"Failed to read file {args.path}: {body}")
+    if status >= 400:
+        sys.exit(format_api_error(f"Failed to read file {args.path}", status, body))
+    sys.stdout.buffer.write(body)
+
+
+def cmd_file_text(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
+    if args.encoding:
+        payload["encoding"] = args.encoding
+    if args.max_bytes is not None:
+        payload["maxBytes"] = args.max_bytes
+    if args.max_lines is not None:
+        payload["maxLines"] = args.max_lines
+
+    body = api_post(session, "/file/read", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    content = body.get("content", "")
+    sys.stdout.write(content)
+    if content and not content.endswith("\n"):
+        sys.stdout.write("\n")
+    if body.get("truncated"):
+        print(
+            f"[truncated after {body.get('bytesRead')} bytes, {body.get('linesRead')} lines]",
+            file=sys.stderr,
+        )
+
+
+def cmd_file_upload(args):
+    session = load_session()
+    if not os.path.isfile(args.local_path):
+        sys.exit(f"File not found: {args.local_path}")
+    params = {
+        "ownerId": session.owner_id,
+        "notebookId": session.notebook_id,
+    }
+    if args.directory:
+        params["directory"] = args.directory
+    result = api_upload(session, "/file/upload", args.local_path, params, timeout=transfer_request_timeout())
+    if args.json:
+        print_json(result)
+        return
+    if isinstance(result, dict):
+        print(f"Uploaded: {result.get('fileName', args.local_path)}")
+    else:
+        print(f"Uploaded: {args.local_path}")
+
+
+def cmd_file_delete(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
+    status, body = api_request(session, "/file/delete", payload)
+    if status == 0:
+        sys.exit(f"Failed to delete file: {body}")
+    if status >= 400:
+        sys.exit(format_api_error(f"Failed to delete file {args.path}", status, body))
+    if args.json:
+        print_json({"deleted": True, "filePath": args.path})
+        return
+    print(f"Deleted: {args.path}")
+
+
+def cmd_file_exists(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
+    body = api_post(session, "/file/exists", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    exists = body.get("exists", False)
+    print(f"{args.path}: {'exists' if exists else 'not found'}")
+    if not exists:
+        sys.exit(1)
+
+
+def cmd_databases(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    body = api_post(session, "/databases", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    databases = body.get("databases", [])
+    if not databases:
+        print("No databases attached.")
+        return
+    for db in databases:
+        schema_indicator = " (schema available)" if db.get("hasSchema") else ""
+        print(f"  {db.get('databaseId', '?')}  {db.get('name', '?')} [{db.get('driver', '?')}]{schema_indicator}")
+
+
+def cmd_db_schema(args):
+    session = load_session()
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "databaseId": args.database_id,
+    }
+    if args.path:
+        payload["path"] = args.path.split(".")
+    else:
+        payload["path"] = []
+    if args.depth:
+        payload["depth"] = args.depth
+    if args.verbosity:
+        payload["verbosity"] = args.verbosity
+
+    body = api_post(session, "/database/schema/children", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    _print_schema_tree(body.get("children", []), indent=0)
+    errors = body.get("errors")
+    if errors:
+        print(f"\nWarning: {errors}", file=sys.stderr)
+
+
+def _print_schema_tree(children, indent):
+    prefix = "  " * indent
+    for child in children:
+        name = child.get("name", "?")
+        kind = child.get("kind", "")
+        info = child.get("info", "")
+        desc_count = child.get("descendantCount", 0)
+
+        label = f"{prefix}{name}"
+        if kind:
+            label += f"  ({kind})"
+        if info:
+            label += f"  {info}"
+        if desc_count > 0 and not child.get("children"):
+            label += f"  [{desc_count} descendants]"
+        print(label)
+
+        sub = child.get("children", [])
+        if sub:
+            _print_schema_tree(sub, indent + 1)
+
+
+def cmd_db_search(args):
+    session = load_session()
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "databaseId": args.database_id,
+        "query": args.query,
+    }
+    if args.kinds:
+        payload["kinds"] = [k.strip() for k in args.kinds.split(",")]
+    if args.limit:
+        payload["limit"] = args.limit
+    if args.verbosity:
+        payload["verbosity"] = args.verbosity
+
+    body = api_post(session, "/database/schema/search", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    results = body.get("results", [])
+    total = body.get("totalMatches", len(results))
+    truncated = body.get("truncated", False)
+
+    if not results:
+        print("No matches.")
+        return
+
+    for r in results:
+        path_str = ".".join(r.get("path", []))
+        kind = r.get("kind", "")
+        print(f"  {r.get('name', '?')}  ({kind})  path: {path_str}")
+
+    if truncated:
+        print(f"\n  Showing {len(results)} of {total} matches (truncated).")
+
+
+def cmd_db_condensed(args):
+    session = load_session()
+    payload = {
+        "notebookId": session.notebook_id_dict(),
+        "databaseId": args.database_id,
+    }
+    body = api_post(session, "/database/schema/condensed", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(body.get("schema", ""))
+
+
+# -- Kernel --------------------------------------------------------------- #
+
+def cmd_kernel_status(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    body = api_post(session, "/kernel/status", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    state = body.get("state", "?")
+    running = body.get("runningCellId")
+    print(f"Kernel: {state}")
+    if running:
+        print(f"Running cell: {running}")
+
+
+def cmd_kernel_restart(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    if args.reinstall_environment:
+        payload["reinstallEnvironment"] = True
+    if args.wait:
+        payload["waitUntilReady"] = True
+        payload["waitTimeoutMs"] = args.timeout_ms
+
+    body = api_post(
+        session,
+        "/kernel/restart",
+        payload,
+        timeout=request_timeout_for_server_wait(args.timeout_ms) if args.wait else None,
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(f"Kernel: {body.get('state', '?')}")
+    if body.get("timedOut"):
+        print("Restart timed out before the kernel became ready.", file=sys.stderr)
+        sys.exit(2)
+
+
+def cmd_kernel_interrupt(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    body = api_post(session, "/kernel/interrupt", payload)
+
+    if args.json:
+        print_json(body)
+        return
+
+    interrupted = body.get("interrupted", False)
+    print("Interrupted running cell." if interrupted else "No running cell to interrupt.")
+
+
+# --------------------------------------------------------------------------- #
+# Argument parser
+# --------------------------------------------------------------------------- #
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="datalore",
+        description="Datalore notebook CLI — manage cells, files, and databases.",
+    )
+    parser.add_argument("--json", action="store_true", help="Output raw JSON responses")
+    parser.add_argument("--verbose", action="store_true", help="Print HTTP requests to stderr")
+
+    sub = parser.add_subparsers(dest="command")
+
+    # -- init ---------------------------------------------------------------- #
+    p = sub.add_parser("init", help="Initialize session from notebook URL")
+    p.add_argument("url", help="Notebook URL (https://<host>/notebook/<owner>/<id>/...)")
+    p.add_argument("--api-token-stdin", action="store_true",
+                   help="Read API token from stdin instead of prompting")
+
+    # -- cells --------------------------------------------------------------- #
+    p_cells = sub.add_parser("cells", help="List or run notebook cells")
+    p_cells.add_argument("--full", action="store_true", help="Include cell source code")
+    p_cells.add_argument("--worksheet-index", type=int, help="Worksheet tab index (default: 0)")
+    p_cells.add_argument("--include-outputs", action="store_true",
+                         help="Fetch statuses and outputs for all listed cells")
+    cells_sub = p_cells.add_subparsers(dest="cells_command")
+
+    p = cells_sub.add_parser("run", help="Execute cells in order")
+    p.add_argument("cell_ids", nargs="+", help="Cell IDs to run")
+    p.add_argument("--stop-on-error", action=argparse.BooleanOptionalAction, default=None,
+                   help="Stop after first ERROR status (default: true)")
+    p.add_argument("--timeout-ms", type=int, default=30000,
+                   help="Per-cell API wait timeout in ms (max 30000)")
+
+    # -- cell ---------------------------------------------------------------- #
+    p_cell = sub.add_parser("cell", help="Cell operations")
+    cell_sub = p_cell.add_subparsers(dest="cell_command")
+
+    # cell get
+    p = cell_sub.add_parser("get", help="Get cell with status and outputs")
+    p.add_argument("cell_id", help="Cell ID")
+
+    # cell create
+    p = cell_sub.add_parser("create", help="Create cell (source from stdin)")
+    p.add_argument("--type", default="CODE", choices=["CODE", "MARKDOWN", "SQL", "CONTROL"],
+                   help="Cell type (default: CODE)")
+    p.add_argument("--language", default="python",
+                   help="Language for CODE cells (default: python)")
+    p.add_argument("--after", dest="after_cell_id", help="Insert after this cell ID")
+    p.add_argument("--before", dest="before_cell_id", help="Insert before this cell ID")
+    p.add_argument("--database-id", dest="database_id", help="Database ID for SQL cells")
+    p.add_argument("--variable", dest="variable_name",
+                   help="DataFrame variable name for SQL cells")
+    p.add_argument("--data-json", dest="data_json",
+                   help="Cell data JSON object, or @file, for advanced cell metadata")
+    p.add_argument("--control-json", dest="control_json",
+                   help="Control JSON object, @file, or '-' for CONTROL cells")
+    p.add_argument("--source", dest="source", help="Cell source (alternative to stdin)")
+    p.add_argument("--run", action="store_true", help="Execute after creation")
+    p.add_argument("--wait", action="store_true",
+                   help="For CODE, SQL, and CONTROL cells, run after creation and wait for completion")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help=f"Max wait seconds (default: {DEFAULT_TIMEOUT})")
+
+    # cell edit
+    p = cell_sub.add_parser("edit", help="Edit cell (new source from stdin)")
+    p.add_argument("cell_id", help="Cell ID")
+    p.add_argument("--source", dest="source", help="New source (alternative to stdin)")
+    p.add_argument("--database-id", dest="database_id", help="Database ID for SQL cells")
+    p.add_argument("--variable", dest="variable_name",
+                   help="DataFrame variable name for SQL cells")
+    p.add_argument("--data-json", dest="data_json",
+                   help="SQL cell data JSON object, or @file")
+    p.add_argument("--run", action="store_true", help="Execute after editing")
+    p.add_argument("--wait", action="store_true",
+                   help="For CODE and SQL cells, run after editing and wait for completion")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help=f"Max wait seconds (default: {DEFAULT_TIMEOUT})")
+
+    # cell run
+    p = cell_sub.add_parser("run", help="Execute a cell")
+    p.add_argument("cell_id", help="Cell ID")
+    p.add_argument("--wait", action="store_true", help="Wait for execution to complete")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help=f"Max wait seconds (default: {DEFAULT_TIMEOUT})")
+
+    # cell outputs
+    p = cell_sub.add_parser("outputs", help="Get cell outputs")
+    p.add_argument("cell_id", help="Cell ID")
+
+    # cell delete
+    p = cell_sub.add_parser("delete", help="Delete a cell")
+    p.add_argument("cell_id", help="Cell ID")
+
+    # cell update-control
+    p = cell_sub.add_parser("update-control", help="Update a control cell")
+    p.add_argument("cell_id", help="Cell ID")
+    p.add_argument("--control-json", dest="control_json", required=True,
+                   help="Control JSON object, @file, or '-' from stdin")
+    p.add_argument("--run", action="store_true", help="Execute after updating")
+    p.add_argument("--wait", action="store_true",
+                   help="Wait for execution to complete (implies --run)")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                   help=f"Max wait seconds (default: {DEFAULT_TIMEOUT})")
+
+    # -- files --------------------------------------------------------------- #
+    p = sub.add_parser("files", help="List files")
+    p.add_argument("--directory", help="Directory to list (default: root)")
+
+    # -- file ---------------------------------------------------------------- #
+    p_file = sub.add_parser("file", help="File operations")
+    file_sub = p_file.add_subparsers(dest="file_command")
+
+    p = file_sub.add_parser("read", help="Download file to stdout")
+    p.add_argument("path", help="File path (e.g. data/notebook_files/data.csv)")
+
+    p = file_sub.add_parser("download", help="Download file to stdout")
+    p.add_argument("path", help="File path (e.g. data/notebook_files/data.csv)")
+
+    p = file_sub.add_parser("text", help="Read file as text")
+    p.add_argument("path", help="File path")
+    p.add_argument("--encoding", help="Text encoding (default: utf-8, then latin-1 fallback)")
+    p.add_argument("--max-bytes", type=int, help="Maximum bytes to read")
+    p.add_argument("--max-lines", type=int, help="Maximum lines to read")
+
+    p = file_sub.add_parser("upload", help="Upload a local file")
+    p.add_argument("local_path", help="Path to local file")
+    p.add_argument("--directory", help="Target directory in notebook")
+
+    p = file_sub.add_parser("delete", help="Delete a file")
+    p.add_argument("path", help="File path")
+
+    p = file_sub.add_parser("exists", help="Check if file exists")
+    p.add_argument("path", help="File path")
+
+    # -- databases ----------------------------------------------------------- #
+    p = sub.add_parser("databases", help="List attached databases")
+
+    # -- db ------------------------------------------------------------------ #
+    p_db = sub.add_parser("db", help="Database operations")
+    db_sub = p_db.add_subparsers(dest="db_command")
+
+    p = db_sub.add_parser("schema", help="Browse schema tree")
+    p.add_argument("database_id", help="Database ID")
+    p.add_argument("--path", help="Dot-separated path (e.g. public.tables.users)")
+    p.add_argument("--depth", type=int, help="Levels of children to include (default: 1)")
+    p.add_argument("--verbosity", choices=["essential", "standard", "full"],
+                   help="Schema verbosity level")
+
+    p = db_sub.add_parser("search", help="Search schema by name")
+    p.add_argument("database_id", help="Database ID")
+    p.add_argument("query", help="Search query (case-insensitive substring)")
+    p.add_argument("--kinds", help="Comma-separated kinds filter (e.g. TABLE,VIEW)")
+    p.add_argument("--limit", type=int, help="Max results (default: 50)")
+    p.add_argument("--verbosity", choices=["essential", "standard", "full"],
+                   help="Schema verbosity level")
+
+    p = db_sub.add_parser("condensed", help="Print compact schema text")
+    p.add_argument("database_id", help="Database ID")
+
+    # -- kernel -------------------------------------------------------------- #
+    p_kernel = sub.add_parser("kernel", help="Kernel operations")
+    kernel_sub = p_kernel.add_subparsers(dest="kernel_command")
+
+    kernel_sub.add_parser("status", help="Check kernel state")
+    p = kernel_sub.add_parser("restart", help="Restart kernel")
+    p.add_argument("--reinstall-environment", action="store_true",
+                   help="Reinstall environment during restart")
+    p.add_argument("--wait", action="store_true", help="Wait until kernel is ready")
+    p.add_argument("--timeout-ms", type=int, default=30000,
+                   help="Kernel restart wait timeout in ms")
+    kernel_sub.add_parser("interrupt", help="Interrupt execution")
+
+    # -- worksheet ----------------------------------------------------------- #
+    p_worksheet = sub.add_parser("worksheet", help="Worksheet operations")
+    worksheet_sub = p_worksheet.add_subparsers(dest="worksheet_command")
+    p = worksheet_sub.add_parser("create", help="Create a worksheet tab")
+    p.add_argument("--name", help="Worksheet name")
+    p.add_argument("--worksheet-index", type=int, help="Insert at worksheet tab index")
+
+    # -- definitions --------------------------------------------------------- #
+    p = sub.add_parser("definitions", help="Go to definition")
+    p.add_argument("cell_id", help="Cell ID")
+    p.add_argument("line", type=int, help="1-based line")
+    p.add_argument("column", type=int, help="1-based column")
+
+    return parser
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+
+COMMAND_MAP = {
+    "init": cmd_init,
+    "databases": cmd_databases,
+    "definitions": cmd_definitions,
+}
+
+CELL_COMMAND_MAP = {
+    "get": cmd_cell_get,
+    "create": cmd_cell_create,
+    "edit": cmd_cell_edit,
+    "run": cmd_cell_run,
+    "outputs": cmd_cell_outputs,
+    "delete": cmd_cell_delete,
+    "update-control": cmd_cell_update_control,
+}
+
+FILE_COMMAND_MAP = {
+    "read": cmd_file_read,
+    "download": cmd_file_read,
+    "text": cmd_file_text,
+    "upload": cmd_file_upload,
+    "delete": cmd_file_delete,
+    "exists": cmd_file_exists,
+}
+
+DB_COMMAND_MAP = {
+    "schema": cmd_db_schema,
+    "search": cmd_db_search,
+    "condensed": cmd_db_condensed,
+}
+
+KERNEL_COMMAND_MAP = {
+    "status": cmd_kernel_status,
+    "restart": cmd_kernel_restart,
+    "interrupt": cmd_kernel_interrupt,
+}
+
+WORKSHEET_COMMAND_MAP = {
+    "create": cmd_worksheet_create,
+}
+
+
+def main():
+    global VERBOSE
+    parser = build_parser()
+    args = parser.parse_args()
+
+    VERBOSE = getattr(args, "verbose", False)
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Top-level commands
+    if args.command in COMMAND_MAP:
+        COMMAND_MAP[args.command](args)
+        return
+
+    if args.command == "files":
+        cmd_files(args)
+        return
+
+    # Two-level subcommands
+    if args.command == "cells":
+        if args.cells_command == "run":
+            cmd_cells_run(args)
+        else:
+            cmd_cells(args)
+        return
+
+    if args.command == "cell":
+        if not args.cell_command:
+            parser.parse_args(["cell", "--help"])
+            return
+        handler = CELL_COMMAND_MAP.get(args.cell_command)
+        if handler:
+            handler(args)
+        else:
+            sys.exit(f"Unknown cell command: {args.cell_command}")
+        return
+
+    if args.command == "file":
+        if not args.file_command:
+            parser.parse_args(["file", "--help"])
+            return
+        handler = FILE_COMMAND_MAP.get(args.file_command)
+        if handler:
+            handler(args)
+        else:
+            sys.exit(f"Unknown file command: {args.file_command}")
+        return
+
+    if args.command == "db":
+        if not args.db_command:
+            parser.parse_args(["db", "--help"])
+            return
+        handler = DB_COMMAND_MAP.get(args.db_command)
+        if handler:
+            handler(args)
+        else:
+            sys.exit(f"Unknown db command: {args.db_command}")
+        return
+
+    if args.command == "kernel":
+        if not args.kernel_command:
+            parser.parse_args(["kernel", "--help"])
+            return
+        handler = KERNEL_COMMAND_MAP.get(args.kernel_command)
+        if handler:
+            handler(args)
+        else:
+            sys.exit(f"Unknown kernel command: {args.kernel_command}")
+        return
+
+    if args.command == "worksheet":
+        if not args.worksheet_command:
+            parser.parse_args(["worksheet", "--help"])
+            return
+        handler = WORKSHEET_COMMAND_MAP.get(args.worksheet_command)
+        if handler:
+            handler(args)
+        else:
+            sys.exit(f"Unknown worksheet command: {args.worksheet_command}")
+        return
+
+    sys.exit(f"Unknown command: {args.command}")
+
+
+if __name__ == "__main__":
+    main()
