@@ -7,6 +7,7 @@ Datalore notebook CLI — manage cells, files, and databases from the command li
 
 Session management:
   datalore init <notebook-url>     Parse URL, verify auth, save session
+  datalore logout [notebook-url]   Delete saved notebook credentials and session
 
 Cell operations:
   datalore cells [--full]          List all cells
@@ -196,6 +197,25 @@ def get_keychain_credentials(host, owner_id, notebook_id):
         return keyring.get_password(SERVICE, notebook_credentials_key(host, owner_id, notebook_id))
     except Exception as e:
         fail_keychain("read", e)
+
+
+def delete_credentials(host, owner_id, notebook_id):
+    keyring = require_keyring()
+    key = notebook_credentials_key(host, owner_id, notebook_id)
+    try:
+        existing = keyring.get_password(SERVICE, key)
+    except Exception as e:
+        fail_keychain("read", e)
+    if not existing:
+        print("\n  No system keychain credentials found.\n")
+        return False
+
+    try:
+        keyring.delete_password(SERVICE, key)
+    except Exception as e:
+        fail_keychain("delete", e)
+    print("\n  Deleted system keychain credentials.\n")
+    return True
 
 
 def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token=None):
@@ -450,8 +470,22 @@ def save_session(scheme, host, owner_id, notebook_id):
         sys.exit(f"Cannot write {SESSION_FILE}: {exception_summary(e)}")
 
 
-def load_session():
-    """Load session from .datalore-session and resolve credentials."""
+def delete_session():
+    session_path = Path(SESSION_FILE)
+    try:
+        session_path.unlink()
+    except FileNotFoundError:
+        print(f"No {SESSION_FILE} found.")
+        return False
+    except OSError as e:
+        sys.exit(f"Cannot delete {SESSION_FILE}: {exception_summary(e)}")
+
+    print(f"Deleted {SESSION_FILE}.")
+    return True
+
+
+def load_session_identity():
+    """Load notebook identity from .datalore-session without resolving credentials."""
     path = Path(SESSION_FILE)
     if not path.exists():
         sys.exit(f"No {SESSION_FILE} found. Run `datalore init <notebook-url>` first.")
@@ -488,6 +522,12 @@ def load_session():
     host = data["host"]
     owner_id = data["ownerId"]
     notebook_id = data["notebookId"]
+    return scheme, host, owner_id, notebook_id
+
+
+def load_session():
+    """Load session from .datalore-session and resolve credentials."""
+    scheme, host, owner_id, notebook_id = load_session_identity()
 
     token = get_env_api_token()
     if not token:
@@ -840,6 +880,16 @@ def cmd_init(args):
         return
 
     initialize_session_with_oauth(scheme, host, owner_id, notebook_id)
+
+
+def cmd_logout(args):
+    if args.url:
+        _scheme, host, owner_id, notebook_id = parse_notebook_url(args.url)
+    else:
+        _scheme, host, owner_id, notebook_id = load_session_identity()
+    delete_credentials(host, owner_id, notebook_id)
+    delete_session()
+    print(f"Logged out from notebook {notebook_id} on {host}")
 
 
 def initialize_session_with_token(
@@ -1665,6 +1715,10 @@ def build_parser():
     p.add_argument("--api-token-stdin", action="store_true",
                    help="Read API token from stdin instead of prompting")
 
+    # -- logout -------------------------------------------------------------- #
+    p = sub.add_parser("logout", help="Delete saved notebook credentials and session")
+    p.add_argument("url", nargs="?", help="Notebook URL (defaults to current .datalore-session)")
+
     # -- cells --------------------------------------------------------------- #
     p_cells = sub.add_parser("cells", help="List or run notebook cells")
     p_cells.add_argument("--full", action="store_true", help="Include cell source code")
@@ -1841,6 +1895,7 @@ def build_parser():
 
 COMMAND_MAP = {
     "init": cmd_init,
+    "logout": cmd_logout,
     "databases": cmd_databases,
     "definitions": cmd_definitions,
 }

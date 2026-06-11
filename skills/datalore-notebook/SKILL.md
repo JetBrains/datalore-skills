@@ -20,7 +20,7 @@ Use the bundled `scripts/datalore` CLI for notebook work. It is a `uv run --scri
 
 ## Available scripts
 
-- `scripts/datalore` - CLI for Datalore notebook cells, files, databases, kernel, and worksheet operations. Run notebook commands through this script. For setup, run the absolute path to `scripts/datalore init <notebook-url>` from the task workspace so `.datalore-session` is created there.
+- `scripts/datalore` - CLI for Datalore notebook cells, files, databases, kernel, and worksheet operations. Run notebook commands through this script. For setup, run the absolute path to `scripts/datalore init <notebook-url>` from the task workspace so `.datalore-session` is created there. To remove local access for the current notebook, run `scripts/datalore logout`; to remove credentials for another notebook, run `scripts/datalore logout <notebook-url>`.
 
 ## Setup
 
@@ -114,6 +114,7 @@ scripts/datalore file delete <path>
 
 ```bash
 scripts/datalore --json <command> ...
+scripts/datalore logout [notebook-url]
 scripts/datalore cell get <cell-id>
 scripts/datalore cells run <cell-id>...
 scripts/datalore files --directory data/notebook_files
