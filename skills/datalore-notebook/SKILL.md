@@ -8,7 +8,7 @@ description: >
   against attached databases", or "create notebook cells". Requires uv.
 compatibility: >
   Requires macOS/Linux with uv installed. Authenticates with
-  DATALORE_API_TOKEN or notebook-scoped system keychain credentials via the bundled scripts/datalore CLI.
+  DATALORE_API_TOKEN, OAuth PKCE browser login, or notebook-scoped system keychain credentials via the bundled scripts/datalore CLI.
 metadata:
   author: JetBrains
   version: 0.0.1
@@ -16,11 +16,11 @@ metadata:
 
 # Datalore Notebook Agent
 
-Use the bundled `scripts/datalore` CLI for notebook work. It is a `uv run --script` CLI with pinned inline Python dependencies, wraps the public Notebook API, stores notebook identity in `.datalore-session`, and authenticates with `DATALORE_API_TOKEN` first, otherwise system keychain credentials saved per notebook path.
+Use the bundled `scripts/datalore` CLI for notebook work. It is a `uv run --script` CLI with pinned inline Python dependencies, wraps the public Notebook API, stores notebook identity in `.datalore-session`, and authenticates with `DATALORE_API_TOKEN` first, otherwise system keychain credentials saved per notebook path. When no valid credential is available, `init` starts OAuth PKCE browser login and saves the resulting notebook credentials.
 
 ## Available scripts
 
-- `scripts/datalore` - CLI for Datalore notebook cells, files, databases, kernel, and worksheet operations. Run notebook commands through this script; for human keychain setup, ask the user to run the absolute path to `scripts/datalore init <notebook-url>` from the task workspace so `.datalore-session` is created there.
+- `scripts/datalore` - CLI for Datalore notebook cells, files, databases, kernel, and worksheet operations. Run notebook commands through this script. For setup, run the absolute path to `scripts/datalore init <notebook-url>` from the task workspace so `.datalore-session` is created there.
 
 ## Setup
 
@@ -35,19 +35,16 @@ cd <task-workspace>
 ~/.agents/skills/datalore-notebook/scripts/datalore init <notebook-url>
 ```
 
-If `DATALORE_API_TOKEN` is not set, `init` may prompt for an API token and save it in the keychain under the notebook path,
-so ask the user to run it from the task workspace when needed. Do not ask the user to paste tokens into chat.
+If `DATALORE_API_TOKEN` is not set, `init` starts OAuth PKCE browser login and saves the resulting token in the keychain under the notebook path. Run `init` yourself from the task workspace and relay the printed browser URL if the browser does not open automatically. Do not ask the user to paste tokens into chat.
 
-If some valid command fails for authentication, stop and ask the user to run init FROM THE CURRENT DIRECTORY. Do not continue with token discovery.
-Do not propose the ! prefix (bang-prefix command mode) for this: it's not a TTY.
+If a valid command fails for authentication, run `init` yourself FROM THE CURRENT DIRECTORY. Do not continue with token discovery. Ask the user to run `init` manually only if the CLI cannot start OAuth, the OAuth callback times out, keychain access fails, or the user needs to complete browser authorization outside the agent environment.
 
 Put `--json` before the command for machine-readable responses. This applies to API commands that return structured data; `file read` and `file download` always stream raw file bytes to stdout, so do not use `--json` with them. Prefer the CLI over raw API calls; use `references/api-reference.md` only for schema details.
 
 ## Workflow
 
 1. Orient first, treating authentication as a hard gate.
-If `init` fails for any reason — including a non-interactive/no-TTY environment where it cannot prompt for a token — STOP and ask the user to run `init` FROM THE CURRENT DIRECTORY themselves.
-Do not propose the ! prefix (bang-prefix command mode) for this: it's not a TTY.
+If no `.datalore-session` exists or authentication fails, run `init` FROM THE CURRENT DIRECTORY. `init` can start OAuth PKCE browser login and prints an authorization URL before waiting for the callback, so do not stop just because the environment is non-interactive. Stop and ask the user to run `init` manually only after the automatic `init` attempt fails in a way the agent cannot complete.
 
 ```bash
 scripts/datalore cells --full
@@ -134,7 +131,7 @@ CONTROL cells are executable in single-cell commands (`cell create --type CONTRO
 
 ## Troubleshooting
 
-- No credentials or 401: Stop and ask the user to run `/absolute/path/to/datalore-notebook/scripts/datalore init <notebook-url>` from the task workspace.
+- No credentials or 401: Run `/absolute/path/to/datalore-notebook/scripts/datalore init <notebook-url>` from the task workspace. If OAuth PKCE prints an authorization URL, relay it to the user. Ask the user to run the command manually only if the agent-run `init` cannot complete.
 - Empty/unhelpful output: retry with `--json` or `--verbose`.
 - File endpoints fail before computation starts: run `scripts/datalore cell create --type CODE --wait --source "print('ready')"` and retry.
 - Insert at top: use `--before <first-cell-id>`. Omitting `--before`/`--after` appends.

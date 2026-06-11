@@ -45,18 +45,28 @@ Code insight:
   datalore definitions <id> <line> <column>
 
 Authentication uses a Datalore API token as a bearer token. Set
-`DATALORE_API_TOKEN` for keychain-free environments, or run
-`datalore init <url>` in a terminal to save notebook credentials interactively.
+`DATALORE_API_TOKEN` for keychain-free environments, pass `--api-token-stdin`,
+or run `datalore init <url>` to authorize through the browser and
+save notebook credentials interactively.
 """
 
 import argparse
+import base64
+import hashlib
 import getpass
+import html
+import http.server
 import json
 import os
 import re
+import secrets
 import sys
 import time
+import urllib.parse
+import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import requests
 
@@ -80,6 +90,12 @@ TRANSFER_READ_TIMEOUT_SECONDS = 30 * 60
 SERVER_WAIT_GRACE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 VERBOSE = False
+OAUTH_CLIENT_ID = "datalore-notebook-cli"
+OAUTH_SCOPE = "notebook_api"
+OAUTH_API_PATH = "/api/user_management/v1/api-tokens/oauth"
+OAUTH_CALLBACK_HOST = "127.0.0.1"
+OAUTH_CALLBACK_PATH = "/callback"
+OAUTH_CALLBACK_TIMEOUT_SECONDS = 300
 
 
 # --------------------------------------------------------------------------- #
@@ -141,14 +157,14 @@ def prompt_credentials(host, owner_id, notebook_id, reason=None):
             sys.exit(
                 f"{reason}, and this is a non-interactive session so a replacement "
                 f"token cannot be prompted for.\n"
-                f"Set {ENV_API_TOKEN}, or run `datalore init <notebook-url>` from an "
-                f"interactive terminal to save a new token to the keychain."
+                f"Set {ENV_API_TOKEN}, pass --api-token-stdin, or run "
+                f"`datalore init <notebook-url>` to authorize through the browser."
             )
         sys.exit(
             f"No {ENV_API_TOKEN} set and no saved credentials, and this is a "
             f"non-interactive session so a token cannot be prompted for.\n"
-            f"Set {ENV_API_TOKEN}, or run `datalore init <notebook-url>` from an "
-            f"interactive terminal to save a token to the keychain."
+            f"Set {ENV_API_TOKEN}, pass --api-token-stdin, or run "
+            f"`datalore init <notebook-url>` to authorize through the browser."
         )
     print(f"\n  Notebook: https://{host}/notebook/{owner_id}/{notebook_id}/\n")
     print("  Datalore API token")
@@ -197,6 +213,201 @@ def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token
         return api_token, False, True
 
     return prompt_credentials(host, owner_id, notebook_id), True, False
+
+
+# --------------------------------------------------------------------------- #
+# OAuth PKCE
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class PkcePair:
+    verifier: str
+    challenge: str
+
+
+@dataclass(frozen=True)
+class OAuthCallbackResult:
+    code: Optional[str]
+    error: Optional[str]
+    message: str
+
+
+def base64url_without_padding(data):
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def generate_pkce_pair():
+    verifier = base64url_without_padding(secrets.token_bytes(32))
+    return PkcePair(verifier=verifier, challenge=calculate_pkce_challenge(verifier))
+
+
+def generate_oauth_state():
+    return base64url_without_padding(secrets.token_bytes(32))
+
+
+def calculate_pkce_challenge(verifier):
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64url_without_padding(digest)
+
+
+def oauth_authorize_url(scheme, host, owner_id, notebook_id, redirect_uri, state, code_challenge):
+    query = urllib.parse.urlencode(
+        {
+            "response_type": "code",
+            "client_id": OAUTH_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "scope": OAUTH_SCOPE,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "notebookId": f"{owner_id}/{notebook_id}",
+        }
+    )
+    return f"{scheme}://{host}{OAUTH_API_PATH}/authorize?{query}"
+
+
+def oauth_token_url(scheme, host):
+    return f"{scheme}://{host}{OAUTH_API_PATH}/token"
+
+
+def parse_oauth_callback(path, expected_state):
+    parsed = urllib.parse.urlparse(path)
+    if parsed.path != OAUTH_CALLBACK_PATH:
+        return OAuthCallbackResult(None, "invalid_callback", "Unexpected OAuth callback path.")
+
+    params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    state = first_query_param(params, "state")
+    if state != expected_state:
+        return OAuthCallbackResult(None, "state_mismatch", "OAuth callback state did not match.")
+
+    error = first_query_param(params, "error")
+    if error:
+        if error == "access_denied":
+            return OAuthCallbackResult(None, error, "Access was denied.")
+        return OAuthCallbackResult(None, error, f"Authorization failed: {error}.")
+
+    code = first_query_param(params, "code")
+    if not code:
+        return OAuthCallbackResult(None, "missing_code", "OAuth callback did not include an authorization code.")
+
+    return OAuthCallbackResult(code, None, "Authorization succeeded.")
+
+
+def first_query_param(params, name):
+    values = params.get(name)
+    if not values:
+        return None
+    return values[0]
+
+
+def oauth_callback_page(result):
+    if result.code and not result.error:
+        title = "Datalore CLI authorization complete"
+        detail = "You can return to the terminal."
+    elif result.error == "access_denied":
+        title = "Datalore CLI authorization denied"
+        detail = "You can close this tab."
+    else:
+        title = "Datalore CLI authorization failed"
+        detail = result.message
+
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{html.escape(title)}</title>"
+        "<style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;margin:48px;line-height:1.4;color:#1f2328}"
+        "main{max-width:560px}h1{font-size:24px;margin:0 0 12px}</style></head>"
+        f"<body><main><h1>{html.escape(title)}</h1><p>{html.escape(detail)}</p></main></body></html>"
+    )
+
+
+def create_oauth_callback_server(expected_state):
+    result_holder = {"result": None}
+
+    class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if urllib.parse.urlparse(self.path).path != OAUTH_CALLBACK_PATH:
+                # Ignore stray requests (e.g. browser favicon probes) and keep waiting for the real callback.
+                self.send_error(404)
+                return
+            result = parse_oauth_callback(self.path, expected_state)
+            result_holder["result"] = result
+            body = oauth_callback_page(result).encode("utf-8")
+            status = 200 if result.code and not result.error else 400
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format, *_args):
+            if VERBOSE:
+                super().log_message(_format, *_args)
+
+    server = http.server.HTTPServer((OAUTH_CALLBACK_HOST, 0), OAuthCallbackHandler)
+    server.timeout = 1
+    redirect_uri = f"http://{OAUTH_CALLBACK_HOST}:{server.server_port}{OAUTH_CALLBACK_PATH}"
+    return server, redirect_uri, result_holder
+
+
+def wait_for_oauth_callback(server, result_holder):
+    try:
+        deadline = time.monotonic() + OAUTH_CALLBACK_TIMEOUT_SECONDS
+        while result_holder["result"] is None and time.monotonic() < deadline:
+            server.handle_request()
+    finally:
+        server.server_close()
+
+    result = result_holder["result"]
+    if result is None:
+        return OAuthCallbackResult(None, "timeout", "Timed out waiting for browser authorization.")
+    return result
+
+
+def request_oauth_authorization(scheme, host, owner_id, notebook_id, pkce_pair, state):
+    server, redirect_uri, result_holder = create_oauth_callback_server(state)
+    authorize_url = oauth_authorize_url(scheme, host, owner_id, notebook_id, redirect_uri, state, pkce_pair.challenge)
+    print("Opening browser for Datalore authorization.")
+    print()
+    print("If the browser does not open, you can copy and paste the following URL into a new tab of your browser:")
+    print(authorize_url)
+    sys.stdout.flush()
+    if not webbrowser.open(authorize_url, new=1, autoraise=True):
+        print("Open this URL in your browser to authorize the CLI:")
+        print(authorize_url)
+        sys.stdout.flush()
+    result = wait_for_oauth_callback(server, result_holder)
+    return redirect_uri, result
+
+
+def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifier):
+    url = oauth_token_url(scheme, host)
+    payload = {
+        "grant_type": "authorization_code",
+        "client_id": OAUTH_CLIENT_ID,
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier,
+    }
+    safe_payload = dict(payload)
+    safe_payload["code_verifier"] = "***"
+    log_http_request("POST", url, json_body=safe_payload)
+    try:
+        response = requests.post(url, data=payload, timeout=default_request_timeout())
+    except requests.RequestException as e:
+        sys.exit(f"OAuth token exchange failed: {e}")
+
+    body = parse_response_body(response)
+    if response.status_code >= 400:
+        sys.exit(format_api_error("OAuth token exchange failed", response.status_code, body))
+    if not isinstance(body, dict):
+        sys.exit(f"OAuth token exchange returned an unexpected response (HTTP {response.status_code}).")
+    access_token = body.get("accessToken")
+    token_type = body.get("tokenType")
+    if not isinstance(access_token, str) or not access_token:
+        sys.exit("OAuth token exchange did not return an access token.")
+    if token_type != "Bearer":
+        sys.exit(f"OAuth token exchange returned unsupported token type: {token_type}")
+    return access_token
 
 
 # --------------------------------------------------------------------------- #
@@ -282,7 +493,7 @@ def load_session():
     if not token:
         token = get_keychain_credentials(host, owner_id, notebook_id)
     if not token:
-        sys.exit(f"No credentials for this notebook. Set {ENV_API_TOKEN} or run `datalore init <notebook-url>` in a terminal.")
+        sys.exit(f"No credentials for this notebook. Set {ENV_API_TOKEN} or run `datalore init <notebook-url>`.")
 
     return Session(host, owner_id, notebook_id, token, scheme)
 
@@ -604,16 +815,43 @@ def cmd_init(args):
     if args.api_token_stdin and get_env_api_token():
         reject_api_token_stdin_env_conflict()
     explicit_api_token = read_api_token_from_stdin() if args.api_token_stdin else None
-    api_token, should_save_credentials, can_renew_keychain_token = resolve_credentials_for_init(
-        host,
-        owner_id,
-        notebook_id,
-        explicit_api_token,
-    )
 
-    session = Session(host, owner_id, notebook_id, api_token, scheme)
-    payload = {"notebookId": session.notebook_id_dict()}
-    status, body = api_request(session, "/cells", payload)
+    if explicit_api_token is not None or get_env_api_token():
+        api_token, should_save_credentials, can_renew_keychain_token = resolve_credentials_for_init(
+            host,
+            owner_id,
+            notebook_id,
+            explicit_api_token,
+        )
+        initialize_session_with_token(
+            scheme,
+            host,
+            owner_id,
+            notebook_id,
+            api_token,
+            should_save_credentials,
+            can_renew_keychain_token,
+        )
+        return
+
+    api_token = get_keychain_credentials(host, owner_id, notebook_id)
+    if api_token:
+        initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, api_token)
+        return
+
+    initialize_session_with_oauth(scheme, host, owner_id, notebook_id)
+
+
+def initialize_session_with_token(
+    scheme,
+    host,
+    owner_id,
+    notebook_id,
+    api_token,
+    should_save_credentials,
+    can_renew_keychain_token,
+):
+    status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
     if status == 401 and can_renew_keychain_token:
         print("\n  Saved API token is invalid or expired. Enter a replacement token.\n", file=sys.stderr)
         api_token = prompt_credentials(
@@ -623,8 +861,7 @@ def cmd_init(args):
             "Saved API token is invalid or expired",
         )
         should_save_credentials = True
-        session = Session(host, owner_id, notebook_id, api_token, scheme)
-        status, body = api_request(session, "/cells", payload)
+        status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
     if status == 0:
         sys.exit(f"API request failed: {body}")
     if status >= 400:
@@ -633,11 +870,56 @@ def cmd_init(args):
     if should_save_credentials:
         save_credentials(host, owner_id, notebook_id, api_token)
 
+    save_initialized_session(scheme, host, owner_id, notebook_id)
+
+
+def initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, api_token):
+    status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
+    if status == 0:
+        sys.exit(f"API request failed: {body}")
+    if status == 401:
+        print("\n  Saved API token is invalid or expired. Starting browser authorization.\n", file=sys.stderr)
+        initialize_session_with_oauth(scheme, host, owner_id, notebook_id)
+        return
+    if status >= 400:
+        sys.exit(format_api_error("API error", status, body))
+
+    save_initialized_session(scheme, host, owner_id, notebook_id)
+
+
+def check_init_token(scheme, host, owner_id, notebook_id, api_token):
+    session = Session(host, owner_id, notebook_id, api_token, scheme)
+    payload = {"notebookId": session.notebook_id_dict()}
+    return api_request(session, "/cells", payload)
+
+
+def initialize_session_with_oauth(scheme, host, owner_id, notebook_id):
+    pkce_pair = generate_pkce_pair()
+    state = generate_oauth_state()
+    redirect_uri, callback = request_oauth_authorization(scheme, host, owner_id, notebook_id, pkce_pair, state)
+    if callback.error:
+        sys.exit(callback.message)
+
+    api_token = exchange_oauth_code_for_token(scheme, host, callback.code, redirect_uri, pkce_pair.verifier)
+    session = Session(host, owner_id, notebook_id, api_token, scheme)
+    payload = {"notebookId": session.notebook_id_dict()}
+    status, body = api_request(session, "/cells", payload)
+    if status == 0:
+        sys.exit(f"API request failed: {body}")
+    if status >= 400:
+        sys.exit(format_api_error("API error", status, body))
+
+    save_credentials(host, owner_id, notebook_id, api_token)
+    save_initialized_session(scheme, host, owner_id, notebook_id)
+
+
+def save_initialized_session(scheme, host, owner_id, notebook_id):
     save_session(scheme, host, owner_id, notebook_id)
     print(f"Session saved for notebook {notebook_id} on {host}")
     print(f"  Owner:    {owner_id}")
     print(f"  Notebook: {notebook_id}")
     print(f"  File:     {SESSION_FILE}")
+
 
 def cmd_cells(args):
     session = load_session()
