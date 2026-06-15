@@ -20,6 +20,17 @@ The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed 
 
 #### Claude
 
+##### Plugin
+
+This skill can be installed through the plugin marketplace:
+
+```
+/plugin marketplace add JetBrains/datalore-skills
+/plugin install datalore-skills@jetbrains-datalore
+```
+
+##### Manual
+
 ```bash
 mkdir -p ~/.claude/skills
 cp -R skills/datalore-notebook ~/.claude/skills/
