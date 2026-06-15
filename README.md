@@ -1,6 +1,6 @@
 # Datalore skills for AI agents
 
-This repository contains official AI skills for working with JetBrains Datalore.
+This repository contains official AI skills for working with [JetBrains Datalore](https://datalore.jetbrains.com/).
 
 ## /datalore-notebook
 
