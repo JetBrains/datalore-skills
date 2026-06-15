@@ -18,9 +18,15 @@ The skill works in Datalore Cloud.
 
 The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed on the machine.
 
-#### Claude
+#### Via [skills](https://github.com/vercel-labs/skills) to any supporting agent
 
-##### Plugin
+Install the skill with `npx skills`:
+
+```bash
+npx skills add JetBrains/datalore-skills --skill datalore-notebook --global
+```
+
+#### Claude Plugin
 
 This skill can be installed through the plugin marketplace:
 
@@ -29,20 +35,10 @@ This skill can be installed through the plugin marketplace:
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
-##### Manual
+### Usage
 
-```bash
-mkdir -p ~/.claude/skills
-cp -R skills/datalore-notebook ~/.claude/skills/
-```
+Ask an agent to do something, mentioning a notebook URL. For example, "In Datalore notebook https://datalore.jetbrains.com/notebook/qwerty/asdfgh analyze the attached csv".
 
-#### Codex or other tool respecting `.agents`
+You will be asked to confirm access to the notebook. After confirmation, the token is stored in the system keychain and the notebook data in the `.datalore-session` file in the current directory. Run `datalore logout` from the same directory to delete the token from the keychain.
 
-```bash
-mkdir -p ~/.agents/skills
-cp -R skills/datalore-notebook ~/.agents/skills/
-```
-
-### Authentication
-
-The CLI is authenticated with a PKCE flow. By default, the tokens are are per-notebook (scoped to public notebook API) and live for 7 days.
+The token is per-notebook (scoped to public notebook API) and lives for 7 days.
