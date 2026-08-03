@@ -23,7 +23,7 @@ The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed 
 Install the skill with `npx skills`:
 
 ```bash
-npx skills add JetBrains/datalore-skills --skill datalore-notebook --global
+npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.2.2 --skill datalore-notebook --global
 ```
 
 #### Claude Plugin
@@ -31,7 +31,7 @@ npx skills add JetBrains/datalore-skills --skill datalore-notebook --global
 This skill can be installed through the plugin marketplace:
 
 ```
-/plugin marketplace add JetBrains/datalore-skills
+/plugin marketplace add https://github.com/JetBrains/datalore-skills.git#2026.2.2
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
