@@ -3,67 +3,131 @@
 # dependencies = ["keyring==25.7.0", "requests>=2.32,<3"]
 # ///
 """
-Datalore notebook CLI — manage cells, files, and databases from the command line.
+Datalore CLI — manage sessions, workspaces, notebook content, and workspace resources.
 
-Session management:
-  datalore init <notebook-url>     Parse URL, verify auth, save session
-  datalore logout [notebook-url]   Delete saved notebook credentials and session
+Top-level commands:
+  datalore init <url>              Initialize a session for notebook, workspace, or user scope
+  datalore workspaces              List own workspaces
+  datalore workspace ...           Workspace-scoped operations and resources
+  datalore notebook ...            Notebook-scoped operations
+  datalore logout [url]            Delete saved credentials and session
 
-Cell operations:
-  datalore cells [--full]          List all cells
-  datalore cells run <ids...>      Execute cells in order
-  datalore cell get <id>           Get cell with status and outputs
-  datalore cell create [flags]     Create cell (source from stdin)
-  datalore cell edit <id> [flags]  Edit cell (new source from stdin)
-  datalore cell run <id> [--wait]  Execute a cell
-  datalore cell outputs <id>       Get cell outputs
-  datalore cell delete <id>        Delete a cell
-  datalore cell update-control <id> Update a control cell
+Workspace operations:
+  datalore workspace info          Show current workspace metadata
+  datalore workspace entries       List direct entries of the current workspace
+  datalore workspace reports        List all reports in the current workspace
+  datalore workspace file <entity-id>
+                                   Show file/notebook metadata
+  datalore workspace breadcrumbs <entity-id>
+                                   Show breadcrumbs for an entity
+  datalore workspace folder <folder-id>
+                                   Show folder metadata, breadcrumb, and direct children
+  datalore workspace folder-entries <folder-id>
+                                   List direct entries of a folder in the current workspace
+  datalore workspace mkdir <name> [--parent <folder-id>]
+                                   Create a folder in the current workspace
+  datalore workspace create-notebook <name> [--parent <folder-id>] [--language python]
+                                   Create a notebook in the current workspace
+  datalore workspace rename <entity-id> <name>
+                                   Rename a notebook or folder
+  datalore workspace move <entity-id> <parent-id>
+                                   Move a notebook or folder
+  datalore workspace move-to-trash <entity-id>
+                                   Move an entity to trash
+  datalore workspace remove-from-trash <entity-id>
+                                   Permanently remove an entity from trash
+  datalore workspace restore-from-trash <entity-id>
+                                   Restore an entity from trash
+  datalore workspace empty-trash   Permanently remove all trash contents
+  datalore workspace database query [--workspace-id <id>] --database-id <id> --name <name> --query <sql>
+                                    Execute a database query and write CSV to stdout
+  datalore workspace databases [list|get|drivers|create|update|delete|search|usage|clone] ...
+                                   Manage workspace database resources
+  datalore workspace datasources [list|get|create|update|delete|search|usage|clone] ...
+  datalore workspace environments [list|get|create|update|delete|search|usage|clone] ...
+  datalore workspace git-repositories [list|get|create|update|delete|search|usage|clone] ...
+  datalore workspace ssh-keys [list|get|create|update|delete|search|usage|clone] ...
 
-File operations:
-  datalore files [--directory D]   List files
-  datalore file read <path>        Download file to stdout
-  datalore file text <path>        Read a text preview
-  datalore file upload <local>     Upload file
-  datalore file delete <path>      Delete file
-  datalore file exists <path>      Check file existence
-
-Database operations:
-  datalore databases               List attached databases
-  datalore db schema <id>          Browse schema tree
-  datalore db condensed <id>       Print compact schema text
-  datalore db search <id> <query>  Search schema by name
-
-Kernel operations:
-  datalore kernel status           Check kernel state
-  datalore kernel restart          Restart kernel
-  datalore kernel interrupt        Interrupt execution
-
-Worksheet operations:
-  datalore worksheet create        Create a worksheet tab
-
-Code insight:
-  datalore definitions <id> <line> <column>
+Notebook operations:
+  datalore notebook cells [--full] List all cells
+  datalore notebook cells run <ids...>
+                                   Execute cells in order
+  datalore notebook cell get <id>  Get cell with status and outputs
+  datalore notebook cell create [flags]
+                                   Create cell (source from stdin)
+  datalore notebook cell edit <id> [flags]
+                                   Edit cell (new source from stdin)
+  datalore notebook cell run <id> [--wait]
+                                   Execute a cell
+  datalore notebook cell outputs <id>
+                                   Get cell outputs
+  datalore notebook cell delete <id>
+                                   Delete a cell
+  datalore notebook cell update-control <id>
+                                   Update a control cell
+  datalore notebook files [--directory D]
+                                   List files
+  datalore notebook file read <path>
+                                   Download file to stdout
+  datalore notebook file text <path>
+                                   Read a text preview
+  datalore notebook file upload <local>
+                                   Upload file
+  datalore notebook file delete <path>
+                                   Delete file
+  datalore notebook file exists <path>
+                                   Check file existence
+  datalore notebook attached-databases
+                                   List databases attached to the current notebook
+  datalore notebook databases [attached|get-attached|attach|detach] ...
+                                   Manage notebook database attachments
+  datalore notebook datasources [attached|get-attached|attach|update-attachment|detach] ...
+                                   Manage notebook datasource attachments
+  datalore notebook environments [attached|get-attached|attach|detach] ...
+                                   Manage notebook environment attachments
+  datalore notebook git-repositories [attached|get-attached|attach|update-attachment|detach] ...
+                                   Manage notebook git repository attachments
+  datalore notebook db schema <id>
+                                   Browse schema tree
+  datalore notebook db condensed <id>
+                                   Print compact schema text
+  datalore notebook db search <id> <query>
+                                   Search schema by name
+  datalore notebook kernel status  Check kernel state
+  datalore notebook kernel restart Restart kernel
+  datalore notebook kernel interrupt
+                                   Interrupt execution
+  datalore notebook agent stop     Stop the notebook agent
+  datalore notebook worksheet create
+                                   Create a worksheet tab
+  datalore notebook report [get|replace|add-tab|rename-tab|move-tab|remove-tab|
+                            add-row|move-row|remove-row|upsert-cell|remove-cell|publish] ...
+                                   Manage and publish the notebook report layout
+  datalore notebook definitions <id> <line> <column>
+                                   Go to definition
 
 Authentication uses a Datalore API token as a bearer token. Set
 `DATALORE_API_TOKEN` for keychain-free environments, pass `--api-token-stdin`,
-or run `datalore init <url>` to authorize through the browser and
-save notebook credentials interactively.
+or run `datalore init <url> [--scope <scope>]` to authorize through the browser and
+save scoped credentials interactively.
 """
 
 import argparse
 import base64
-import hashlib
+import datetime
 import getpass
+import hashlib
 import html
 import http.server
 import json
+import keyring
 import os
 import re
 import secrets
 import sys
 import time
 import urllib.parse
+import uuid
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,12 +135,16 @@ from typing import Optional
 
 import requests
 
-
 # --------------------------------------------------------------------------- #
 # Constants
 # --------------------------------------------------------------------------- #
 
 SERVICE = "datalore-notebook"
+AGENT_SKILL_VERSION = "2026.3"
+AGENT_SKILL_VERSION_HEADER = "X-Agent-Skill-Version"
+AGENT_SKILL_VERSION_MISMATCH_PROBLEM_TYPE = "urn:datalore:problem:agent-skill-version-mismatch"
+LEGACY_AGENT_SKILL_VERSION = "2026.2.2"
+KEYRING_ACCESS_PROBE_KEY = "__keyring_access_probe__"
 SESSION_FILE = ".datalore-session"
 ENV_API_TOKEN = "DATALORE_API_TOKEN"
 TERMINAL_STATUSES = {"VALID", "ERROR", "WARNING"}
@@ -91,12 +159,63 @@ TRANSFER_READ_TIMEOUT_SECONDS = 30 * 60
 SERVER_WAIT_GRACE_SECONDS = 60
 DOWNLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 VERBOSE = False
+NOTEBOOK_ID_OVERRIDE = None
+WORKSPACE_ID_OVERRIDE = None
 OAUTH_CLIENT_ID = "datalore-notebook-cli"
-OAUTH_SCOPE = "notebook_api"
+NOTEBOOK_API_SCOPE = "notebook_api"
+NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE = "notebook_with_workspace_view"
+USER_BASIC_SCOPE = "user_basic"
+WORKSPACE_SCOPE = "workspace"
+NOTEBOOK_SCOPES = {NOTEBOOK_API_SCOPE, NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE}
+WORKSPACE_SCOPES = [WORKSPACE_SCOPE]
+SUPPORTED_OAUTH_SCOPES = NOTEBOOK_SCOPES | {USER_BASIC_SCOPE, WORKSPACE_SCOPE}
+AUTH_ACCESS_ORDER = ["READ", "CREATE", "FULL"]
+SUPPORTED_AUTH_ACCESS = {value.lower() for value in AUTH_ACCESS_ORDER}
+DEFAULT_AUTH_ACCESS = "FULL"
+AUTH_SCOPE_ORDER = [USER_BASIC_SCOPE, NOTEBOOK_API_SCOPE, NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE, WORKSPACE_SCOPE]
+SERVER_SCOPE_TO_OAUTH_SCOPE = {
+    "NOTEBOOK_API": NOTEBOOK_API_SCOPE,
+    "NOTEBOOK_WITH_WORKSPACE_VIEW": NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE,
+    "USER_BASIC": USER_BASIC_SCOPE,
+    "WORKSPACE": WORKSPACE_SCOPE,
+}
 OAUTH_API_PATH = "/api/user_management/v1/api-tokens/oauth"
+AGENT_SKILL_VERSION_API_PATH = "/api/agent/v1/version"
+AGENT_SKILL_VALIDATE_VERSION_API_PATH = "/api/agent/v1/validate_version"
+NOTEBOOK_API_PATH = "/api/notebook/v1"
+USER_PUBLIC_API_PATH = "/api/user_public/v1"
+WORKSPACES_API_PATH = "/api/workspaces/v1"
 OAUTH_CALLBACK_HOST = "127.0.0.1"
 OAUTH_CALLBACK_PATH = "/callback"
 OAUTH_CALLBACK_TIMEOUT_SECONDS = 300
+
+
+def normalize_scope_access(scope, access=None):
+    if scope == WORKSPACE_SCOPE:
+        normalized_access = (access or DEFAULT_AUTH_ACCESS).upper()
+        if normalized_access not in AUTH_ACCESS_ORDER:
+            sys.exit(f"Unsupported auth access: {access}")
+        return scope, normalized_access
+    return scope, DEFAULT_AUTH_ACCESS
+
+
+def parse_auth_access(value):
+    if value is None:
+        return DEFAULT_AUTH_ACCESS
+    normalized = value.strip().upper()
+    if normalized not in AUTH_ACCESS_ORDER:
+        supported = ", ".join(sorted(SUPPORTED_AUTH_ACCESS))
+        sys.exit(f"--access must be one of: {supported}.")
+    return normalized
+
+
+def auth_access_display(value):
+    return value.lower().capitalize()
+
+
+def higher_or_equal_auth_accesses(value):
+    normalized = parse_auth_access(value)
+    return AUTH_ACCESS_ORDER[AUTH_ACCESS_ORDER.index(normalized):]
 
 
 # --------------------------------------------------------------------------- #
@@ -135,41 +254,121 @@ def fail_keychain(action, error):
     sys.exit(
         f"Cannot {action} system keychain credentials: {exception_summary(error)}\n"
         f"Set {ENV_API_TOKEN} for keychain-free use, or fix keychain access and run "
-        f"`datalore init <notebook-url>` again."
+        f"`datalore init <url> [--scope <scope>]` again."
     )
 
 
 def require_keyring():
-    try:
-        import keyring
-    except Exception as e:
-        fail_keychain("load", e)
-
     return keyring
 
 
+def preflight_keyring_access():
+    try:
+        keyring.get_password(SERVICE, KEYRING_ACCESS_PROBE_KEY)
+    except Exception as e:
+        sys.exit(
+            f"Cannot access the system keychain: {exception_summary(e)}\n"
+            "The Datalore CLI requires host execution. Re-run the same command outside the sandbox.\n"
+            "Do not set UV_CACHE_DIR or retry inside the sandbox."
+        )
+
+
+def credentials_key(host, scope, owner_id, notebook_id, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
+    if scope == NOTEBOOK_API_SCOPE:
+        return f"{host}/notebook/{owner_id}/{notebook_id}/api_token"
+    if scope == NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE:
+        return f"{host}/notebook/{owner_id}/{notebook_id}/{scope}/api_token"
+    if scope in WORKSPACE_SCOPES:
+        if not workspace_id:
+            sys.exit(f"{scope} requires --workspace-id.")
+        return f"{host}/workspace/{workspace_id}/{scope}/{access}/api_token"
+    if scope == USER_BASIC_SCOPE:
+        return f"{host}/user/{scope}/api_token"
+    return sys.exit(f"Unsupported scope: {scope}")
+
+
 def notebook_credentials_key(host, owner_id, notebook_id):
-    return f"{host}/notebook/{owner_id}/{notebook_id}/api_token"
+    return credentials_key(host, NOTEBOOK_API_SCOPE, owner_id, notebook_id)
 
 
-def prompt_credentials(host, owner_id, notebook_id, reason=None):
+def load_user_basic_lookup_hint(host):
+    session_path = Path(SESSION_FILE)
+    if not session_path.exists():
+        return None, None, None, None
+    try:
+        _scheme, session_host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
+    except SystemExit:
+        return None, None, None, None
+    if session_host != host:
+        return None, None, None, None
+    if scope in NOTEBOOK_SCOPES:
+        return owner_id, notebook_id, None, None
+    if scope in WORKSPACE_SCOPES:
+        return None, None, workspace_id, access
+    return None, None, None, None
+
+
+def credential_lookup_keys(host, owner_id, notebook_id, scope, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
+    candidate_keys = [credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)]
+
+    if scope in WORKSPACE_SCOPES:
+        candidate_keys.extend(
+            credentials_key(host, scope, owner_id, notebook_id, workspace_id, candidate_access)
+            for candidate_access in higher_or_equal_auth_accesses(access)[1:]
+        )
+    elif scope == USER_BASIC_SCOPE:
+        lookup_owner_id = owner_id
+        lookup_notebook_id = notebook_id
+        lookup_workspace_id = workspace_id
+        lookup_access = access
+        if not ((lookup_owner_id and lookup_notebook_id) or lookup_workspace_id):
+            lookup_owner_id, lookup_notebook_id, lookup_workspace_id, lookup_access = load_user_basic_lookup_hint(host)
+        if lookup_owner_id and lookup_notebook_id:
+            candidate_keys.append(credentials_key(host, NOTEBOOK_API_SCOPE, lookup_owner_id, lookup_notebook_id))
+        if lookup_workspace_id:
+            candidate_keys.extend(
+                credentials_key(host, WORKSPACE_SCOPE, None, None, lookup_workspace_id, candidate_access)
+                for candidate_access in AUTH_ACCESS_ORDER
+            )
+
+    deduped_keys = []
+    seen_keys = set()
+    for candidate_key in candidate_keys:
+        if candidate_key in seen_keys:
+            continue
+        seen_keys.add(candidate_key)
+        deduped_keys.append(candidate_key)
+    return deduped_keys
+
+
+def prompt_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS, reason=None):
+    scope, access = normalize_scope_access(scope, access)
     if not sys.stdin.isatty():
         if reason:
             sys.exit(
                 f"{reason}, and this is a non-interactive session so a replacement "
                 f"token cannot be prompted for.\n"
                 f"Set {ENV_API_TOKEN}, pass --api-token-stdin, or run "
-                f"`datalore init <notebook-url>` to authorize through the browser."
+                f"`datalore init <url> [--scope <scope>]` to authorize through the browser."
             )
         sys.exit(
             f"No {ENV_API_TOKEN} set and no saved credentials, and this is a "
             f"non-interactive session so a token cannot be prompted for.\n"
             f"Set {ENV_API_TOKEN}, pass --api-token-stdin, or run "
-            f"`datalore init <notebook-url>` to authorize through the browser."
+            f"`datalore init <url> [--scope <scope>]` to authorize through the browser."
         )
-    print(f"\n  Notebook: https://{host}/notebook/{owner_id}/{notebook_id}/\n")
+    if scope in NOTEBOOK_SCOPES:
+        print(f"\n  Notebook: https://{host}/notebook/{owner_id}/{notebook_id}/\n")
+    elif scope in WORKSPACE_SCOPES:
+        print(f"\n  Workspace: {workspace_id}\n")
+        print(f"  Authorization access: {auth_access_display(access)}")
+    else:
+        print(f"\n  Host: https://{host}/\n")
+    print(f"  Authorization scope: {scope}")
     print("  Datalore API token")
-    print("     Paste a token that can access this notebook.")
+    print("     Paste a token that can access this target.")
     print("     It can be created in the Datalore Notebook UI under Tools > API Token.")
     print()
     api_token = getpass.getpass("  Paste API token: ").strip()
@@ -179,29 +378,50 @@ def prompt_credentials(host, owner_id, notebook_id, reason=None):
     return api_token
 
 
-def save_credentials(host, owner_id, notebook_id, api_token):
+def save_credentials(host, owner_id, notebook_id, api_token, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
     if get_env_api_token():
         print(f"\n  {ENV_API_TOKEN} is set; system keychain was not updated.\n")
         return
     keyring = require_keyring()
     try:
-        keyring.set_password(SERVICE, notebook_credentials_key(host, owner_id, notebook_id), api_token)
+        keyring.set_password(SERVICE, credentials_key(host, scope, owner_id, notebook_id, workspace_id, access), api_token)
     except Exception as e:
         fail_keychain("save", e)
     print("\n  Saved to system keychain.\n")
 
 
-def get_keychain_credentials(host, owner_id, notebook_id):
-    keyring = require_keyring()
+def get_keychain_password(keyring, key):
     try:
-        return keyring.get_password(SERVICE, notebook_credentials_key(host, owner_id, notebook_id))
+        return keyring.get_password(SERVICE, key)
     except Exception as e:
         fail_keychain("read", e)
 
 
-def delete_credentials(host, owner_id, notebook_id):
+def cache_user_basic_credentials(keyring, host, credential):
+    try:
+        keyring.set_password(SERVICE, credentials_key(host, USER_BASIC_SCOPE, None, None), credential)
+    except Exception:
+        return
+
+
+def get_keychain_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
     keyring = require_keyring()
-    key = notebook_credentials_key(host, owner_id, notebook_id)
+    exact_key = credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)
+    for candidate_key in credential_lookup_keys(host, owner_id, notebook_id, scope, workspace_id, access):
+        credential = get_keychain_password(keyring, candidate_key)
+        if credential:
+            if scope == USER_BASIC_SCOPE and candidate_key != exact_key:
+                cache_user_basic_credentials(keyring, host, credential)
+            return credential
+    return None
+
+
+def delete_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
+    keyring = require_keyring()
+    key = credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)
     try:
         existing = keyring.get_password(SERVICE, key)
     except Exception as e:
@@ -218,7 +438,9 @@ def delete_credentials(host, owner_id, notebook_id):
     return True
 
 
-def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token=None):
+def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token=None, scope=NOTEBOOK_API_SCOPE, workspace_id=None,
+                                 access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
     if explicit_api_token is not None:
         if get_env_api_token():
             reject_api_token_stdin_env_conflict()
@@ -228,11 +450,11 @@ def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token
     if env_api_token:
         return env_api_token, False, False
 
-    api_token = get_keychain_credentials(host, owner_id, notebook_id)
+    api_token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
     if api_token:
         return api_token, False, True
 
-    return prompt_credentials(host, owner_id, notebook_id), True, False
+    return prompt_credentials(host, owner_id, notebook_id, scope, workspace_id, access), True, False
 
 
 # --------------------------------------------------------------------------- #
@@ -270,19 +492,28 @@ def calculate_pkce_challenge(verifier):
     return base64url_without_padding(digest)
 
 
-def oauth_authorize_url(scheme, host, owner_id, notebook_id, redirect_uri, state, code_challenge):
-    query = urllib.parse.urlencode(
-        {
-            "response_type": "code",
-            "client_id": OAUTH_CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "scope": OAUTH_SCOPE,
-            "state": state,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-            "notebookId": f"{owner_id}/{notebook_id}",
-        }
-    )
+def oauth_authorize_url(scheme, host, redirect_uri, state, code_challenge, scope, owner_id=None, notebook_id=None, workspace_id=None,
+                        access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
+    if scope not in SUPPORTED_OAUTH_SCOPES:
+        sys.exit(f"Unsupported OAuth scope: {scope}")
+
+    query_params = {
+        "response_type": "code",
+        "client_id": OAUTH_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    if scope in NOTEBOOK_SCOPES:
+        query_params["notebookId"] = f"{owner_id}/{notebook_id}"
+    elif scope in WORKSPACE_SCOPES:
+        query_params["workspaceId"] = workspace_id
+        query_params["access"] = access.lower()
+
+    query = urllib.parse.urlencode(query_params)
     return f"{scheme}://{host}{OAUTH_API_PATH}/authorize?{query}"
 
 
@@ -383,9 +614,20 @@ def wait_for_oauth_callback(server, result_holder):
     return result
 
 
-def request_oauth_authorization(scheme, host, owner_id, notebook_id, pkce_pair, state):
+def request_oauth_authorization(scheme, host, owner_id, notebook_id, workspace_id, scope, access, pkce_pair, state):
     server, redirect_uri, result_holder = create_oauth_callback_server(state)
-    authorize_url = oauth_authorize_url(scheme, host, owner_id, notebook_id, redirect_uri, state, pkce_pair.challenge)
+    authorize_url = oauth_authorize_url(
+        scheme,
+        host,
+        redirect_uri,
+        state,
+        pkce_pair.challenge,
+        scope,
+        owner_id=owner_id,
+        notebook_id=notebook_id,
+        workspace_id=workspace_id,
+        access=access,
+    )
     print("Opening browser for Datalore authorization.")
     print()
     print("If the browser does not open, you can copy and paste the following URL into a new tab of your browser:")
@@ -397,6 +639,100 @@ def request_oauth_authorization(scheme, host, owner_id, notebook_id, pkce_pair, 
         sys.stdout.flush()
     result = wait_for_oauth_callback(server, result_holder)
     return redirect_uri, result
+
+
+def require_scope_compatibility(scheme, host, scope):
+    if scope == NOTEBOOK_API_SCOPE:
+        return
+
+    version_url = f"{scheme}://{host}{AGENT_SKILL_VERSION_API_PATH}"
+    log_http_request("GET", version_url)
+    try:
+        version_response = requests.get(
+            version_url,
+            headers=agent_skill_headers(),
+            timeout=default_request_timeout(),
+            allow_redirects=False,
+        )
+    except requests.RequestException as e:
+        fail_scope_compatibility(scope, f"the agent skill version probe failed: {e}")
+
+    if version_response.status_code == 200:
+        server_skill_version = version_response.text.strip()
+        if not server_skill_version:
+            fail_scope_compatibility(scope, "the agent skill version endpoint returned an empty response")
+        if VERBOSE:
+            print(f"  Server agent skill version: {server_skill_version}", file=sys.stderr)
+
+        validate_version_url = f"{scheme}://{host}{AGENT_SKILL_VALIDATE_VERSION_API_PATH}"
+        log_http_request("GET", validate_version_url)
+        try:
+            validate_version_response = requests.get(
+                validate_version_url,
+                headers=agent_skill_headers(),
+                timeout=default_request_timeout(),
+                allow_redirects=False,
+            )
+        except requests.RequestException as e:
+            fail_scope_compatibility(scope, f"the agent skill version validation failed: {e}")
+
+        if validate_version_response.status_code != 200:
+            if validate_version_response.status_code in (400, 404):
+                fail_agent_skill_incompatibility()
+            fail_scope_compatibility(
+                scope,
+                f"the agent skill version validation endpoint returned HTTP {validate_version_response.status_code}",
+            )
+        return
+
+    if version_response.status_code != 404:
+        fail_scope_compatibility(
+            scope,
+            f"the agent skill version endpoint returned HTTP {version_response.status_code}",
+        )
+
+    url = f"{scheme}://{host}{NOTEBOOK_API_PATH}/cells"
+    payload = {
+        "notebookId": {
+            "ownerId": "agent-skill-compatibility-probe",
+            "id": "agent-skill-compatibility-probe",
+        },
+    }
+    log_http_request("POST", url, json_body=payload)
+    try:
+        response = requests.post(
+            url,
+            headers=agent_skill_headers(),
+            json=payload,
+            timeout=default_request_timeout(),
+            allow_redirects=False,
+        )
+    except requests.RequestException as e:
+        fail_scope_compatibility(scope, f"the public notebook API probe failed: {e}")
+
+    server_skill_version = response.headers.get(AGENT_SKILL_VERSION_HEADER, "").strip()
+    if server_skill_version:
+        return
+
+    fail_agent_skill_incompatibility()
+
+
+def fail_agent_skill_incompatibility():
+    sys.exit(
+        f"The installed datalore-notebook skill version {AGENT_SKILL_VERSION} is incompatible with this Datalore deployment.\n"
+        f"Align the versions: use skill version {LEGACY_AGENT_SKILL_VERSION} with Datalore 2026.2.x, "
+        "or upgrade Datalore to 2026.3 or newer."
+    )
+
+
+def fail_scope_compatibility(scope, reason):
+    sys.exit(
+        f"Cannot verify that this Datalore deployment supports scope {scope}: {reason}.\n"
+        "Initialization was stopped because this scope is unavailable in Datalore 2026.2.x. "
+        f"For a 2026.2.x deployment, install datalore-notebook skill version {LEGACY_AGENT_SKILL_VERSION}; "
+        "otherwise upgrade Datalore to 2026.3 or newer and ensure its proxy passes /api/agent/v1 without an OAuth cookie. "
+        f"The legacy notebook API fallback also requires the {AGENT_SKILL_VERSION_HEADER} response header."
+    )
 
 
 def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifier):
@@ -412,13 +748,18 @@ def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifie
     safe_payload["code_verifier"] = "***"
     log_http_request("POST", url, json_body=safe_payload)
     try:
-        response = requests.post(url, data=payload, timeout=default_request_timeout())
+        response = requests.post(
+            url,
+            headers=agent_skill_headers(),
+            data=payload,
+            timeout=default_request_timeout(),
+        )
     except requests.RequestException as e:
         sys.exit(f"OAuth token exchange failed: {e}")
 
     body = parse_response_body(response)
     if response.status_code >= 400:
-        sys.exit(format_api_error("OAuth token exchange failed", response.status_code, body))
+        sys.exit(format_api_error("OAuth token exchange failed", response.status_code, body, response.headers))
     if not isinstance(body, dict):
         sys.exit(f"OAuth token exchange returned an unexpected response (HTTP {response.status_code}).")
     access_token = body.get("accessToken")
@@ -435,35 +776,90 @@ def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifie
 # --------------------------------------------------------------------------- #
 
 class Session:
-    __slots__ = ("host", "scheme", "owner_id", "notebook_id", "base_url", "token")
+    __slots__ = ("host", "scheme", "owner_id", "notebook_id", "workspace_id", "scope", "access", "token")
 
-    def __init__(self, host, owner_id, notebook_id, token="", scheme="https"):
+    def __init__(self, host, owner_id, notebook_id, token="", scheme="https", scope=NOTEBOOK_API_SCOPE, workspace_id=None,
+                 access=DEFAULT_AUTH_ACCESS):
         self.host = host
         self.scheme = scheme
         self.owner_id = owner_id
         self.notebook_id = notebook_id
-        self.base_url = f"{scheme}://{host}/api/notebook/v1"
+        self.workspace_id = workspace_id
+        self.scope = scope
+        self.access = access
         self.token = token
 
     def notebook_id_dict(self):
+        if not self.owner_id or not self.notebook_id:
+            sys.exit(
+                "Current session does not include notebook identity. "
+                "Re-run `datalore init <notebook-url> --scope notebook_api`."
+            )
         return {"ownerId": self.owner_id, "id": self.notebook_id}
 
 
 # Regex handles both /notebook/owner/id and /notebook/owner/id/anything
-_URL_RE = re.compile(r"(https?)://([^/]+)/notebook/([^/]+)/([^/?#]+)")
+_NOTEBOOK_URL_RE = re.compile(r"(https?)://([^/]+)/notebook/([^/]+)/([^/?#]+)")
+_WORKSPACE_URL_RE = re.compile(r"(https?)://([^/]+)/([^/]+)/([^/]+)/notebooks(?:/[^?#]*)?")
 
 
-def parse_notebook_url(url):
-    """Extract (scheme, host, ownerId, notebookId) from a notebook URL."""
-    m = _URL_RE.search(url)
-    if not m:
-        sys.exit(f"Cannot parse notebook URL: {url}\n"
-                 f"Expected: https://<host>/notebook/<ownerId>/<notebookId>/...")
-    return m.group(1), m.group(2), m.group(3), m.group(4)
+def parse_target_url(url, scope):
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        sys.exit(f"Cannot parse URL: {url}\nExpected an absolute http(s) URL.")
+
+    if scope in NOTEBOOK_SCOPES:
+        match = _NOTEBOOK_URL_RE.search(url)
+        if not match:
+            sys.exit(
+                f"Cannot parse notebook URL: {url}\n"
+                f"Expected: https://<host>/notebook/<ownerId>/<notebookId>/..."
+            )
+        return match.group(1), match.group(2), match.group(3), match.group(4), None
+
+    if scope in WORKSPACE_SCOPES:
+        match = _WORKSPACE_URL_RE.search(url)
+        if not match:
+            sys.exit(
+                f"Cannot parse workspace URL: {url}\n"
+                f"Expected: https://<host>/<ownerId>/<workspaceId>/notebooks"
+            )
+        return match.group(1), match.group(2), None, None, f"{match.group(3)}/{match.group(4)}"
+
+    if scope == USER_BASIC_SCOPE:
+        if parsed.path not in ("", "/"):
+            sys.exit(
+                f"Cannot parse root URL for {scope}: {url}\n"
+                f"Expected: https://<host>/"
+            )
+        return parsed.scheme, parsed.netloc, None, None, None
+
+    sys.exit(f"Unsupported scope: {scope}")
 
 
-def save_session(scheme, host, owner_id, notebook_id):
-    data = {"scheme": scheme, "host": host, "ownerId": owner_id, "notebookId": notebook_id}
+def parse_slash_id(value, id_name):
+    if not isinstance(value, str) or "/" not in value:
+        sys.exit(f"{id_name} must use <ownerId>/<id> form.")
+    owner_id, internal_id = value.split("/", 1)
+    if not owner_id or not internal_id:
+        sys.exit(f"{id_name} must use <ownerId>/<id> form.")
+    return owner_id, internal_id
+
+
+def save_session(scheme, host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    scope, access = normalize_scope_access(scope, access)
+    data = {
+        "scheme": scheme,
+        "host": host,
+        "scope": scope,
+    }
+    if owner_id:
+        data["ownerId"] = owner_id
+    if notebook_id:
+        data["notebookId"] = notebook_id
+    if workspace_id:
+        data["workspaceId"] = workspace_id
+        data["access"] = access
     try:
         Path(SESSION_FILE).write_text(json.dumps(data, indent=2) + "\n")
     except OSError as e:
@@ -485,10 +881,10 @@ def delete_session():
 
 
 def load_session_identity():
-    """Load notebook identity from .datalore-session without resolving credentials."""
+    """Load session identity from .datalore-session without resolving credentials."""
     path = Path(SESSION_FILE)
     if not path.exists():
-        sys.exit(f"No {SESSION_FILE} found. Run `datalore init <notebook-url>` first.")
+        sys.exit(f"No {SESSION_FILE} found. Run `datalore init <url> [--scope <scope>]` first.")
     try:
         data = json.loads(path.read_text())
     except OSError as e:
@@ -496,54 +892,133 @@ def load_session_identity():
     except json.JSONDecodeError as e:
         sys.exit(
             f"Cannot parse {SESSION_FILE}: {exception_summary(e)}\n"
-            f"Run `datalore init <notebook-url>` again from this directory."
+            f"Run `datalore init <url> [--scope <scope>]` again from this directory."
         )
     if not isinstance(data, dict):
         sys.exit(
             f"Invalid {SESSION_FILE}: expected a JSON object.\n"
-            f"Run `datalore init <notebook-url>` again from this directory."
-        )
-    missing_fields = [
-        field
-        for field in ("host", "ownerId", "notebookId")
-        if not isinstance(data.get(field), str) or not data.get(field)
-    ]
-    if missing_fields:
-        sys.exit(
-            f"Invalid {SESSION_FILE}: missing or invalid {', '.join(missing_fields)}.\n"
-            f"Run `datalore init <notebook-url>` again from this directory."
+            f"Run `datalore init <url> [--scope <scope>]` again from this directory."
         )
     scheme = data.get("scheme", "https")
     if not isinstance(scheme, str) or scheme not in ("http", "https"):
         sys.exit(
             f"Invalid {SESSION_FILE}: scheme must be 'http' or 'https'.\n"
-            f"Run `datalore init <notebook-url>` again from this directory."
+            f"Run `datalore init <url> [--scope <scope>]` again from this directory."
         )
-    host = data["host"]
-    owner_id = data["ownerId"]
-    notebook_id = data["notebookId"]
-    return scheme, host, owner_id, notebook_id
+    host = data.get("host")
+    if not isinstance(host, str) or not host:
+        sys.exit(
+            f"Invalid {SESSION_FILE}: missing or invalid host.\n"
+            f"Run `datalore init <url> [--scope <scope>]` again from this directory."
+        )
+    raw_scope = data.get("scope", NOTEBOOK_API_SCOPE)
+    if not isinstance(raw_scope, str) or raw_scope not in SUPPORTED_OAUTH_SCOPES:
+        sys.exit(
+            f"Invalid {SESSION_FILE}: unsupported scope.\n"
+            f"Run `datalore init <url> [--scope <scope>]` again from this directory."
+        )
+    scope = raw_scope
+    owner_id = data.get("ownerId")
+    notebook_id = data.get("notebookId")
+    if scope in NOTEBOOK_SCOPES:
+        missing_fields = [
+            field
+            for field, value in (("ownerId", owner_id), ("notebookId", notebook_id))
+            if not isinstance(value, str) or not value
+        ]
+        if missing_fields:
+            sys.exit(
+                f"Invalid {SESSION_FILE}: missing or invalid {', '.join(missing_fields)} for {scope}.\n"
+                f"Run `datalore init <notebook-url> --scope {scope}` again from this directory."
+            )
+    else:
+        owner_id = owner_id if isinstance(owner_id, str) and owner_id else None
+        notebook_id = notebook_id if isinstance(notebook_id, str) and notebook_id else None
+    workspace_id = data.get("workspaceId")
+    access = data.get("access")
+    scope, access = normalize_scope_access(scope, access)
+    if scope in WORKSPACE_SCOPES and (not isinstance(workspace_id, str) or not workspace_id):
+        sys.exit(
+            f"Invalid {SESSION_FILE}: workspaceId is required for {scope}.\n"
+            f"Run `datalore init <workspace-url> --scope {scope} --workspace-id <owner/workspace>` again from this directory."
+        )
+    if scope not in WORKSPACE_SCOPES:
+        workspace_id = None
+        access = DEFAULT_AUTH_ACCESS
+    return scheme, host, owner_id, notebook_id, scope, workspace_id, access
 
 
 def load_session():
     """Load session from .datalore-session and resolve credentials."""
-    scheme, host, owner_id, notebook_id = load_session_identity()
+    scheme, host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
 
     token = get_env_api_token()
     if not token:
-        token = get_keychain_credentials(host, owner_id, notebook_id)
+        token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
     if not token:
-        sys.exit(f"No credentials for this notebook. Set {ENV_API_TOKEN} or run `datalore init <notebook-url>`.")
+        sys.exit(
+            f"No credentials for the current session. Set {ENV_API_TOKEN} or run "
+            f"`datalore init <url> [--scope <scope>]`."
+        )
 
-    return Session(host, owner_id, notebook_id, token, scheme)
+    session = Session(host, owner_id, notebook_id, token, scheme, scope, workspace_id, access)
+    if NOTEBOOK_ID_OVERRIDE:
+        session.owner_id, session.notebook_id = parse_slash_id(NOTEBOOK_ID_OVERRIDE, "notebookId")
+    if WORKSPACE_ID_OVERRIDE:
+        parse_slash_id(WORKSPACE_ID_OVERRIDE, "workspaceId")
+        session.workspace_id = WORKSPACE_ID_OVERRIDE
+    return session
+
+
+def auth_access_covers(current_access, required_access):
+    return AUTH_ACCESS_ORDER.index(parse_auth_access(current_access)) >= AUTH_ACCESS_ORDER.index(parse_auth_access(required_access))
+
+
+def auth_scope_covers(current_scope, required_scope):
+    return AUTH_SCOPE_ORDER.index(current_scope) >= AUTH_SCOPE_ORDER.index(required_scope)
+
+
+def require_workspace_resource_session(session, command_label, required_access):
+    if session.scope not in WORKSPACE_SCOPES and not WORKSPACE_ID_OVERRIDE:
+        hint = authorization_flow_hint("WORKSPACE", required_access, session)
+        sys.exit(
+            f"`{command_label}` requires a workspace-scoped session with at least "
+            f"{auth_access_display(required_access)} access. {hint}"
+        )
+    if session.scope in WORKSPACE_SCOPES and not auth_access_covers(session.access, required_access):
+        hint = authorization_flow_hint("WORKSPACE", required_access, session)
+        sys.exit(
+            f"`{command_label}` requires at least {auth_access_display(required_access)} workspace access, "
+            f"but the current session has {auth_access_display(session.access)} access. {hint}"
+        )
+
+
+def require_notebook_resource_session(session, command_label, required_scope=NOTEBOOK_API_SCOPE, required_access="READ"):
+    if not auth_scope_covers(session.scope, required_scope):
+        server_scope = "NOTEBOOK_WITH_WORKSPACE_VIEW" if required_scope == NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE else "NOTEBOOK_API"
+        hint = authorization_flow_hint(server_scope, required_access, session)
+        sys.exit(f"`{command_label}` requires at least {required_scope} scope. {hint}")
+    if session.scope == WORKSPACE_SCOPE and not auth_access_covers(session.access, required_access):
+        hint = authorization_flow_hint("WORKSPACE", required_access, session)
+        sys.exit(
+            f"`{command_label}` requires at least {auth_access_display(required_access)} workspace access, "
+            f"but the current session has {auth_access_display(session.access)} access. {hint}"
+        )
 
 
 # --------------------------------------------------------------------------- #
 # HTTP helpers
 # --------------------------------------------------------------------------- #
 
+def agent_skill_headers():
+    return {AGENT_SKILL_VERSION_HEADER: AGENT_SKILL_VERSION}
+
+
 def auth_headers(session):
-    return {"Authorization": f"Bearer {session.token}"}
+    return {
+        **agent_skill_headers(),
+        "Authorization": f"Bearer {session.token}",
+    }
 
 
 def log_http_request(method, url, *, params=None, json_body=None, files=None):
@@ -597,61 +1072,272 @@ def body_error_message(body):
     return str(body)[:500]
 
 
-def format_api_error(prefix, status, body):
+def required_scope_from_headers(headers):
+    if not headers:
+        return None
+    header_value = headers.get("WWW-Authenticate") or headers.get("Www-Authenticate")
+    if not header_value:
+        return None
+    match = re.search(r'\bscope="([^"]+)"', header_value)
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def required_access_from_headers(headers):
+    if not headers:
+        return None
+    header_value = headers.get("WWW-Authenticate") or headers.get("Www-Authenticate")
+    if not header_value:
+        return None
+    match = re.search(r'\baccess="([^"]+)"', header_value)
+    if not match:
+        return None
+    return match.group(1).strip().upper() or None
+
+
+def notebook_url_for_session(session):
+    if session is None or not session.host or not session.owner_id or not session.notebook_id:
+        return "<notebook-url>"
+    return f"{session.scheme}://{session.host}/notebook/{session.owner_id}/{session.notebook_id}/"
+
+
+def workspace_url_for_session(session):
+    if session is None or not session.host:
+        return "<workspace-url>"
+    workspace_id = session.workspace_id
+    if not workspace_id or "/" not in workspace_id:
+        return "<workspace-url>"
+    owner_id, internal_id = workspace_id.split("/", 1)
+    return f"{session.scheme}://{session.host}/{owner_id}/{internal_id}/notebooks"
+
+
+def authorization_target_url_for_scope(oauth_scope, session=None):
+    if oauth_scope in NOTEBOOK_SCOPES:
+        return notebook_url_for_session(session)
+    if oauth_scope in WORKSPACE_SCOPES:
+        return workspace_url_for_session(session)
+    if oauth_scope == USER_BASIC_SCOPE:
+        if session is None or not session.host:
+            return "<host-url>"
+        return f"{session.scheme}://{session.host}/"
+    return "<authorization-url>"
+
+
+def authorization_flow_hint(required_scope, required_access=None, session=None):
+    oauth_scope = SERVER_SCOPE_TO_OAUTH_SCOPE.get(required_scope)
+    if oauth_scope is None:
+        return f"The server requires scope {required_scope}, which this CLI cannot authorize automatically."
+
+    command = f"datalore init {authorization_target_url_for_scope(oauth_scope, session)} --scope {oauth_scope}"
+    if oauth_scope in WORKSPACE_SCOPES:
+        workspace_id = session.workspace_id if session and session.workspace_id else "<owner/workspace>"
+        command += f" --workspace-id {workspace_id}"
+        command += f" --access {(required_access or DEFAULT_AUTH_ACCESS).lower()}"
+
+    env_hint = ""
+    if get_env_api_token():
+        env_hint = f"Unset {ENV_API_TOKEN} first or replace it with a token that has this scope. "
+
+    return (
+        f"The server requires scope {required_scope}"
+        f"{f' with {auth_access_display(required_access)} access' if required_access else ''}. "
+        f"{env_hint}Start a new authorization flow with `{command}` from this directory."
+    )
+
+
+def format_api_error(prefix, status, body, headers=None, session=None):
     message = body_error_message(body)
     if status == 401:
         detail = f": {message}" if message else ""
         return (
             f"{prefix}: authentication failed (HTTP {status}){detail}\n"
             f"The Datalore API token is missing, invalid, or expired. "
-            f"Check {ENV_API_TOKEN} or run `datalore init <notebook-url>` again from this directory."
+            f"Check {ENV_API_TOKEN} or run `datalore init <url> [--scope <scope>]` again from this directory."
+        )
+    if isinstance(body, dict) and body.get("type") == AGENT_SKILL_VERSION_MISMATCH_PROBLEM_TYPE:
+        server_version = headers.get(AGENT_SKILL_VERSION_HEADER, "unknown") if headers else "unknown"
+        raw_compatible_versions = body.get("compatibleVersions")
+        compatible_versions = []
+        if isinstance(raw_compatible_versions, list):
+            for version in raw_compatible_versions:
+                if not isinstance(version, str):
+                    continue
+                version = version.strip()
+                if version and version != server_version and version not in compatible_versions:
+                    compatible_versions.append(version)
+
+        if compatible_versions:
+            compatible_versions_hint = f"Server-compatible skill versions: {', '.join(compatible_versions)}.\n"
+            if server_version == "unknown":
+                install_hint = "Install one of the compatible datalore-notebook skill versions listed above"
+            else:
+                install_hint = f"Install datalore-notebook skill version {server_version} or any listed compatible version"
+        else:
+            compatible_versions_hint = ""
+            install_hint = f"Install datalore-notebook skill version {server_version} to match the server"
+
+        return (
+            f"{prefix}: agent skill version does not match server.\n"
+            f"Current skill version: {AGENT_SKILL_VERSION}.\n"
+            f"Server-required skill version: {server_version}.\n"
+            f"{compatible_versions_hint}"
+            f"{install_hint} (upgrade or downgrade as needed)."
         )
     if status == 403:
         detail = f": {message}" if message else ""
+        required_scope = required_scope_from_headers(headers)
+        required_access = required_access_from_headers(headers)
+        if required_scope:
+            return (
+                f"{prefix}: access denied (HTTP 403){detail}\n"
+                f"{authorization_flow_hint(required_scope, required_access, session)}"
+            )
         return (
             f"{prefix}: access denied (HTTP 403){detail}\n"
-            "The token is valid, but it does not have access to this notebook."
+            "The token is valid, but it does not have permission for this request."
         )
     detail = f": {message}" if message else ""
     return f"{prefix} (HTTP {status}){detail}"
 
 
-def api_request(session, endpoint, payload=None, raw=False, timeout=None):
-    """Make an API request. Returns (http_status, parsed_body).
+def require_matching_workspace_agent_skill_version(scope, headers):
+    if scope not in WORKSPACE_SCOPES:
+        return
+
+    server_version = headers.get(AGENT_SKILL_VERSION_HEADER, "").strip() if headers else ""
+    if not server_version:
+        sys.exit(
+            "Cannot initialize workspace session: the server response did not include "
+            f"{AGENT_SKILL_VERSION_HEADER}.\n"
+            f"Current skill version: {AGENT_SKILL_VERSION}.\n"
+            "This Datalore deployment may predate workspace-scope support. The session was not saved. "
+            f"For Datalore 2026.2.x, install datalore-notebook skill version {LEGACY_AGENT_SKILL_VERSION}; "
+            "otherwise upgrade Datalore and ensure its proxy preserves the agent skill version response header."
+        )
+    if server_version != AGENT_SKILL_VERSION:
+        sys.exit(format_api_error(
+            "API error",
+            400,
+            {"type": AGENT_SKILL_VERSION_MISMATCH_PROBLEM_TYPE},
+            headers,
+        ))
+
+
+def build_api_url(session, api_path, endpoint):
+    return f"{session.scheme}://{session.host}{api_path}{endpoint}"
+
+
+def api_request(
+        session,
+        api_path,
+        endpoint,
+        *,
+        method="POST",
+        payload=None,
+        data=None,
+        params=None,
+        raw=False,
+        timeout=None,
+        content_type=None,
+):
+    """Make an API request. Returns (http_status, parsed_body, response_headers).
 
     When *raw* is True the response stream is returned for file downloads.
     """
-    url = f"{session.base_url}{endpoint}"
-    log_http_request("POST", url, json_body=payload)
+    url = build_api_url(session, api_path, endpoint)
+    log_http_request(method, url, params=params, json_body=payload)
     timeout = timeout or default_request_timeout()
+    headers = auth_headers(session)
+    if content_type:
+        headers["Content-Type"] = content_type
+    request_kwargs = {
+        "headers": headers,
+        "params": params,
+        "timeout": timeout,
+        "stream": raw,
+    }
+    if payload is not None:
+        request_kwargs["json"] = payload
+    if data is not None:
+        request_kwargs["data"] = data
 
     try:
-        response = requests.post(url, headers=auth_headers(session), json=payload, timeout=timeout, stream=raw)
+        if method == "POST":
+            response = requests.post(url, **request_kwargs)
+        elif method == "GET":
+            response = requests.get(url, **request_kwargs)
+        else:
+            sys.exit(f"Unsupported API method: {method}")
     except requests.RequestException as e:
-        return 0, str(e)
+        return 0, str(e), {}
 
     if raw and response.status_code < 400:
-        return response.status_code, response
+        return response.status_code, response, response.headers
 
     body = parse_response_body(response)
     if response.status_code < 400 and isinstance(body, str):
         sys.exit(f"Unexpected response (HTTP {response.status_code}):\n{body[:500]}")
-    return response.status_code, body
+    return response.status_code, body, response.headers
 
 
-def api_post(session, endpoint, payload, timeout=None):
-    """POST with JSON payload; exit on error."""
-    status, body = api_request(session, endpoint, payload, timeout=timeout)
+def api_expect_success(prefix, session, status, body, headers):
     if status == 0:
         sys.exit(f"API request failed: {body}")
     if status >= 400:
-        sys.exit(format_api_error("API error", status, body))
+        sys.exit(format_api_error(prefix, status, body, headers, session))
     return body
+
+
+def notebook_api_request(session, endpoint, payload=None, raw=False, timeout=None):
+    return api_request(session, NOTEBOOK_API_PATH, endpoint, method="POST", payload=payload, raw=raw, timeout=timeout)
+
+
+def notebook_api_post(session, endpoint, payload, timeout=None, error_prefix="API error"):
+    return api_expect_success(error_prefix, session, *notebook_api_request(session, endpoint, payload, timeout=timeout))
+
+
+def workspace_api_get(session, endpoint, params=None, timeout=None, error_prefix="Workspace API error"):
+    return api_expect_success(
+        error_prefix,
+        session,
+        *api_request(session, WORKSPACES_API_PATH, endpoint, method="GET", params=params, timeout=timeout),
+    )
+
+
+def workspace_api_post(session, endpoint, payload=None, params=None, timeout=None, error_prefix="Workspace API error"):
+    return api_expect_success(
+        error_prefix,
+        session,
+        *api_request(session, WORKSPACES_API_PATH, endpoint, method="POST", payload=payload, params=params, timeout=timeout),
+    )
+
+
+def workspace_api_post_raw(session, endpoint, data, params=None, timeout=None, content_type=None):
+    return api_request(
+        session,
+        WORKSPACES_API_PATH,
+        endpoint,
+        method="POST",
+        data=data,
+        params=params,
+        raw=True,
+        timeout=timeout,
+        content_type=content_type,
+    )
+
+
+def user_api_get(session, endpoint, params=None, timeout=None, error_prefix="User API error"):
+    return api_expect_success(
+        error_prefix,
+        session,
+        *api_request(session, USER_PUBLIC_API_PATH, endpoint, method="GET", params=params, timeout=timeout),
+    )
 
 
 def api_upload(session, endpoint, file_path, query_params, timeout=None):
     """Multipart file upload."""
-    url = f"{session.base_url}{endpoint}"
+    url = build_api_url(session, NOTEBOOK_API_PATH, endpoint)
     log_http_request("POST", url, params=query_params, files=["file"])
     timeout = timeout or transfer_request_timeout()
     try:
@@ -668,7 +1354,7 @@ def api_upload(session, endpoint, file_path, query_params, timeout=None):
 
     body_text = response.text
     if response.status_code >= 400:
-        sys.exit(format_api_error("Upload failed", response.status_code, parse_response_body(response)))
+        sys.exit(format_api_error("Upload failed", response.status_code, parse_response_body(response), response.headers, session))
     try:
         return json.loads(body_text) if body_text.strip() else None
     except json.JSONDecodeError:
@@ -692,8 +1378,626 @@ def parse_json_argument(value, argument_name):
     return parsed
 
 
+def read_text_file(path, argument_name):
+    try:
+        return Path(path).read_text()
+    except OSError as e:
+        sys.exit(f"Cannot read file for {argument_name}: {path}: {e}")
+
+
+def parse_key_value_argument(value, argument_name):
+    if "=" not in value:
+        sys.exit(f"{argument_name} must be in KEY=VALUE format: {value}")
+    key, parsed_value = value.split("=", 1)
+    key = key.strip()
+    if not key:
+        sys.exit(f"{argument_name} key must not be empty: {value}")
+    return key, parsed_value
+
+
+def parse_key_value_arguments(values, argument_name):
+    parsed = {}
+    for value in values or []:
+        key, parsed_value = parse_key_value_argument(value, argument_name)
+        if key in parsed:
+            sys.exit(f"Duplicate key '{key}' in {argument_name}.")
+        parsed[key] = parsed_value
+    return parsed
+
+
+def parse_key_path_arguments(values, argument_name):
+    parsed = {}
+    for value in values or []:
+        key, path = parse_key_value_argument(value, argument_name)
+        if key in parsed:
+            sys.exit(f"Duplicate key '{key}' in {argument_name}.")
+        if not path:
+            sys.exit(f"{argument_name} path must not be empty for key '{key}'.")
+        parsed[key] = path
+    return parsed
+
+
+def current_timestamp_iso():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def new_resource_id():
+    return uuid.uuid4().hex
+
+
+def bool_to_json_string(value):
+    return "true" if value else "false"
+
+
+def serialize_map_argument(mapping):
+    return {
+        "keys": list(mapping.keys()),
+        "values": list(mapping.values()),
+    }
+
+
+def maybe_serialize_map_argument(value, argument_name):
+    if value is None:
+        return serialize_map_argument({})
+    if not isinstance(value, dict):
+        sys.exit(f"{argument_name} must be a JSON object.")
+    if set(value.keys()) == {"keys", "values"}:
+        return value
+    return serialize_map_argument(value)
+
+
+def normalize_resource_update_payload(resource_type, resource_data):
+    if resource_type == "databases":
+        normalized = dict(resource_data)
+        for field_name in ("params", "additionalProperties", "advancedProperties", "keys"):
+            if field_name in normalized:
+                normalized[field_name] = maybe_serialize_map_argument(normalized[field_name], field_name)
+        return normalized
+    if resource_type == "datasources":
+        normalized = dict(resource_data)
+        if "fields" in normalized:
+            normalized["fields"] = maybe_serialize_map_argument(normalized["fields"], "fields")
+        return normalized
+    return resource_data
+
+
+def workspace_owner_id(session):
+    if session.workspace_id:
+        owner_id, _workspace_internal_id = parse_slash_id(session.workspace_id, "workspaceId")
+        return owner_id
+    return session.owner_id
+
+
+def default_datasource_fields(session, kind):
+    if kind == "S3":
+        return {"useDefaultCredentials": "false"}
+    if kind == "GCS":
+        return {"useDefaultCredentials": "false"}
+    if kind == "GD":
+        owner_id = workspace_owner_id(session)
+        if not owner_id:
+            sys.exit("Cannot infer Google Drive OWNER_ID for the current workspace.")
+        return {
+            "ROOT_FOLDER": "",
+            "OWNER_ID": owner_id,
+        }
+    if kind == "SMB/CIFS":
+        return {"port": "445"}
+    sys.exit(f"Unsupported datasource kind: {kind}")
+
+
+def build_database_ssh_tunnel_configuration(args):
+    ssh_enabled = any(
+        value is not None and value != ""
+        for value in (
+            args.ssh_host,
+            args.ssh_port,
+            args.ssh_user,
+            args.ssh_password,
+            args.ssh_key_id,
+            args.ssh_auth,
+        )
+    )
+    if not ssh_enabled:
+        return None
+
+    if not args.ssh_host:
+        sys.exit("--ssh-host is required when SSH configuration is provided.")
+    if not args.ssh_user:
+        sys.exit("--ssh-user is required when SSH configuration is provided.")
+
+    ssh_auth = args.ssh_auth or ("key-pair" if args.ssh_key_id else "password")
+    if ssh_auth == "password":
+        if args.ssh_password is None:
+            sys.exit("--ssh-password is required for --ssh-auth password.")
+        if args.ssh_key_id:
+            sys.exit("--ssh-key-id cannot be used with --ssh-auth password.")
+        credentials = {
+            "type": "PASSWORD",
+            "password": args.ssh_password,
+        }
+    else:
+        if not args.ssh_key_id:
+            sys.exit("--ssh-key-id is required for --ssh-auth key-pair.")
+        if args.ssh_password is not None:
+            sys.exit("--ssh-password cannot be used with --ssh-auth key-pair.")
+        credentials = {
+            "type": "KEY_PAIR",
+            "sshKeyId": args.ssh_key_id,
+        }
+
+    return {
+        "host": args.ssh_host,
+        "port": args.ssh_port if args.ssh_port is not None else 22,
+        "username": args.ssh_user,
+        "credentials": credentials,
+    }
+
+
+def build_database_create_resource(args):
+    additional_properties = parse_key_value_arguments(args.additional, "--additional")
+    additional_files = parse_key_path_arguments(args.additional_file, "--additional-file")
+    keys = parse_key_value_arguments(args.key, "--key")
+    key_files = parse_key_path_arguments(args.key_file, "--key-file")
+
+    for field_key, path in additional_files.items():
+        if field_key in additional_properties:
+            sys.exit(f"Duplicate key '{field_key}' provided in --additional and --additional-file.")
+        file_name = Path(path).name
+        if file_name in keys:
+            sys.exit(f"Duplicate database key file name '{file_name}' provided in --key/--key-file and --additional-file.")
+        additional_properties[field_key] = file_name
+        keys[file_name] = read_text_file(path, "--additional-file")
+
+    for key_name, path in key_files.items():
+        if key_name in keys:
+            sys.exit(f"Duplicate key '{key_name}' in --key and --key-file.")
+        keys[key_name] = read_text_file(path, "--key-file")
+
+    if args.save_tokens is not None:
+        if "SaveTokens" in additional_properties:
+            sys.exit("SaveTokens was provided both explicitly and through --save-tokens/--no-save-tokens.")
+        additional_properties["SaveTokens"] = bool_to_json_string(args.save_tokens)
+
+    return {
+        "id": new_resource_id(),
+        "driverRef": {
+            "is_predefined": args.driver_kind == "predefined",
+            "id": args.driver_id,
+        },
+        "name": args.name,
+        "userName": args.user_name or None,
+        "password": args.password,
+        "params": serialize_map_argument(parse_key_value_arguments(args.param, "--param")),
+        "paramsGroupId": args.param_group_id,
+        "additionalProperties": serialize_map_argument(additional_properties),
+        "advancedProperties": serialize_map_argument(parse_key_value_arguments(args.advanced, "--advanced")),
+        "keys": serialize_map_argument(keys),
+        "authProviderId": args.auth_provider_id,
+        "sshTunnelConfiguration": build_database_ssh_tunnel_configuration(args),
+        "introspectionScope": None,
+        "vmOptions": args.vm_options,
+        "useExperimentalSession": args.use_experimental_session,
+    }
+
+
+def build_datasource_create_resource(session, args):
+    fields = default_datasource_fields(session, args.kind)
+    explicit_fields = parse_key_value_arguments(args.field, "--field")
+    explicit_field_files = parse_key_path_arguments(args.field_file, "--field-file")
+    duplicated_fields = set(explicit_fields) & set(explicit_field_files)
+    if duplicated_fields:
+        duplicated = ", ".join(sorted(duplicated_fields))
+        sys.exit(f"Duplicate datasource field(s) provided in --field and --field-file: {duplicated}")
+    fields.update(explicit_fields)
+    for key, path in explicit_field_files.items():
+        fields[key] = read_text_file(path, "--field-file")
+
+    return {
+        "id": new_resource_id(),
+        "name": args.name,
+        "kind": args.kind,
+        "fields": serialize_map_argument(fields),
+    }
+
+
+def build_environment_create_resource(args):
+    variables = []
+    for key, value in parse_key_value_arguments(args.variable, "--variable").items():
+        variables.append({
+            "key": key,
+            "value": value,
+        })
+
+    return {
+        "id": new_resource_id(),
+        "name": args.name,
+        "variables": variables,
+    }
+
+
+def build_git_repository_create_resource(args):
+    reference_type = args.default_reference_type
+    if reference_type is None:
+        reference_type = "head" if args.default_reference == "HEAD" else "branch"
+
+    reference_type_map = {
+        "head": "Head",
+        "branch": "Branch",
+        "tag": "Tag",
+        "commit": "Commit",
+        "unknown": "Unknown",
+    }
+
+    return {
+        "id": new_resource_id(),
+        "name": args.name,
+        "url": args.url,
+        "sshKeyId": args.ssh_key_id,
+        "defaultReference": {
+            "reference": args.default_reference,
+            "type": reference_type_map[reference_type],
+        },
+        "creationTime": current_timestamp_iso(),
+    }
+
+
+def build_ssh_key_create_resource(session, args):
+    if args.generate:
+        generated_key = resource_api_post(
+            session,
+            "ssh-keys",
+            "/generate",
+            params={"algorithm": args.generate.upper()},
+        )
+        generated_key["name"] = args.name or generated_key.get("name") or "New SSH key"
+        return generated_key
+
+    if args.private_key_file:
+        private_key = read_text_file(args.private_key_file, "--private-key-file")
+    else:
+        private_key = args.private_key
+
+    parse_result = resource_api_post(session, "ssh-keys", "/parse", payload={"privateKey": private_key})
+    if parse_result.get("kind") != "SUCCESS":
+        message = parse_result.get("message") or "Unknown SSH key parse error"
+        sys.exit(f"Invalid SSH private key: {message}")
+
+    public_key = parse_result["publicKey"]
+    return {
+        "id": new_resource_id(),
+        "name": args.name or public_key.get("comment") or "New SSH key",
+        "privateKey": private_key,
+        "publicKey": public_key["key"],
+        "md5Fingerprint": public_key["md5Fingerprint"],
+        "sha256Fingerprint": public_key["sha256Fingerprint"],
+        "comment": public_key.get("comment"),
+        "creationTime": current_timestamp_iso(),
+    }
+
+
+def build_resource_create_payload(session, args):
+    resource_type = args.resource_type
+    if resource_type == "databases":
+        return build_database_create_resource(args)
+    if resource_type == "datasources":
+        return build_datasource_create_resource(session, args)
+    if resource_type == "environments":
+        return build_environment_create_resource(args)
+    if resource_type == "git-repositories":
+        return build_git_repository_create_resource(args)
+    if resource_type == "ssh-keys":
+        return build_ssh_key_create_resource(session, args)
+    sys.exit(f"Create is not implemented for resource type: {resource_type}")
+
+
 def print_json(body):
     print(json.dumps(body, indent=2))
+
+
+def add_inheritable_json_flag(parser, help_text="Output raw JSON"):
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=help_text)
+
+
+# --------------------------------------------------------------------------- #
+# Resource API helpers
+# --------------------------------------------------------------------------- #
+
+RESOURCE_API_PATHS = {
+    "databases": "/api/databases/v1",
+    "datasources": "/api/datasources/v1",
+    "environments": "/api/environments/v1",
+    "git-repositories": "/api/git-repositories/v1",
+    "ssh-keys": "/api/ssh-keys/v1",
+}
+
+RESOURCE_TYPE_LABELS = {
+    "databases": "database",
+    "datasources": "datasource",
+    "environments": "environment",
+    "git-repositories": "git repository",
+    "ssh-keys": "SSH key",
+}
+
+RESOURCE_ATTACHMENT_CAPABILITIES = {
+    "databases": {
+        "attached": True,
+        "get-attached": True,
+        "attach": True,
+        "update-attachment": False,
+        "detach": True,
+    },
+    "datasources": {
+        "attached": True,
+        "get-attached": True,
+        "attach": True,
+        "update-attachment": True,
+        "detach": True,
+    },
+    "environments": {
+        "attached": True,
+        "get-attached": True,
+        "attach": True,
+        "update-attachment": False,
+        "detach": True,
+    },
+    "git-repositories": {
+        "attached": True,
+        "get-attached": True,
+        "attach": True,
+        "update-attachment": True,
+        "detach": True,
+    },
+    "ssh-keys": {
+        "attached": False,
+        "get-attached": False,
+        "attach": False,
+        "update-attachment": False,
+        "detach": False,
+    },
+}
+
+RESOURCE_TYPES_WITH_CUSTOM_ATTACHMENT_OPTIONS = {"datasources", "git-repositories"}
+
+
+def resource_api_post(session, resource_type, endpoint, payload=None, params=None, timeout=None):
+    """Make a POST request to a resource API endpoint."""
+    api_path = RESOURCE_API_PATHS.get(resource_type)
+    if api_path is None:
+        sys.exit(f"Unknown resource type: {resource_type}")
+    return api_expect_success(
+        "Resource API error",
+        session,
+        *api_request(session, api_path, endpoint, method="POST", payload=payload, params=params, timeout=timeout),
+    )
+
+
+def get_workspace_scope_id(session):
+    """Build a ResourceScopeId JSON for the current workspace."""
+    owner_id, workspace_internal_id = parse_slash_id(session.workspace_id, "workspaceId")
+    return {
+        "type": "WORKSPACE",
+        "workspaceId": {
+            "ownerId": owner_id,
+            "internalId": workspace_internal_id,
+        }
+    }
+
+
+def get_workspace_id_payload(session):
+    """Build a VfsWorkspaceId JSON for the current workspace."""
+    owner_id, workspace_internal_id = parse_slash_id(session.workspace_id, "workspaceId")
+    return {
+        "ownerId": owner_id,
+        "internalId": workspace_internal_id,
+    }
+
+
+def resource_request(scope_id, resource):
+    """Build a ResourceRequest JSON body."""
+    return {"scopeId": scope_id, "resource": resource}
+
+
+def resource_attachment_request(resource_id, file_id, attachment_options=None):
+    payload = {
+        "resourceId": resource_id,
+        "fileId": file_id,
+    }
+    if attachment_options is not None:
+        payload["attachmentOptions"] = attachment_options
+    return payload
+
+
+def format_resource_line(res, resource_type):
+    """Format one resource for human-readable listing."""
+    rid = res.get("id", "?")
+    if isinstance(rid, dict):
+        rid = rid.get("id", rid.get("internalId", "?"))
+    name = res.get("name", "?")
+    extra = []
+    if resource_type == "databases":
+        driver = res.get("driverRef", {})
+        if isinstance(driver, dict):
+            extra.append(f"[{driver.get('id', '?')}]")
+    if resource_type == "git-repositories":
+        url = res.get("url", "")
+        if url:
+            extra.append(f"({url})")
+    if resource_type == "ssh-keys":
+        fingerprint = res.get("sha256Fingerprint", res.get("md5Fingerprint", ""))
+        if fingerprint:
+            extra.append(f"[{fingerprint}]")
+    if resource_type == "environments":
+        variables = res.get("variables", [])
+        if isinstance(variables, list):
+            extra.append(f"({len(variables)} vars)")
+    if resource_type == "datasources":
+        kind = res.get("kind", "")
+        if kind:
+            extra.append(f"[{kind}]")
+    suffix = " ".join(extra)
+    if suffix:
+        suffix = " " + suffix
+    return f"  {rid:<36} {name}{suffix}"
+
+
+def format_attachment_options_summary(attached_resource, resource_type):
+    options = attached_resource.get("options") or attached_resource.get("attachmentOptions")
+    if not isinstance(options, dict) or not options:
+        return ""
+
+    if resource_type == "datasources":
+        parts = []
+        mountpoint = options.get("mountpoint")
+        if mountpoint:
+            parts.append(f"mount={mountpoint}")
+        parts.append("pass-to-env" if options.get("passToEnv") else "no-pass-to-env")
+        parts.append("read-only" if options.get("readOnly") else "read-write")
+        return " " + " ".join(parts)
+
+    if resource_type == "git-repositories":
+        reference = options.get("reference")
+        if isinstance(reference, dict):
+            parts = []
+            reference_name = reference.get("reference")
+            reference_type = reference.get("type")
+            if reference_name:
+                parts.append(f"ref={reference_name}")
+            if reference_type:
+                parts.append(f"[{reference_type}]")
+            if parts:
+                return " " + " ".join(parts)
+
+    return f" options={json.dumps(options, sort_keys=True)}"
+
+
+def format_attached_resource_line(attached_resource, resource_type):
+    resource = attached_resource.get("resource", attached_resource)
+    return format_resource_line(resource, resource_type) + format_attachment_options_summary(attached_resource, resource_type)
+
+
+def format_usage_line(usage):
+    """Format one resource usage entry."""
+    entity = usage.get("vfsEntityId", {})
+    if isinstance(entity, dict):
+        eid = f"{entity.get('ownerId', '?')}/{entity.get('internalId', '?')}"
+    else:
+        eid = str(entity)
+    name = usage.get("name", "?")
+    return f"  {eid:<40} {name}"
+
+
+def extract_vfs_id(value):
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return "?"
+    owner_id = value.get("ownerId")
+    internal_id = value.get("internalId") or value.get("id")
+    if isinstance(owner_id, str) and isinstance(internal_id, str):
+        return f"{owner_id}/{internal_id}"
+    for key in ("id", "entityId", "entity", "notebook", "folder", "staticReport", "interactiveReport"):
+        nested = value.get(key)
+        if nested is not None and nested is not value:
+            nested_id = extract_vfs_id(nested)
+            if nested_id != "?":
+                return nested_id
+    return "?"
+
+
+def format_workspace_line(workspace_view):
+    workspace = workspace_view.get("workspace", {})
+    workspace_id = extract_vfs_id(workspace.get("id", workspace))
+    access_level = workspace_view.get("accessLevel", "?")
+    name = workspace.get("name", "?")
+    flags = []
+    if workspace_view.get("isSharedWithTeam"):
+        flags.append("team")
+    if workspace_view.get("isCreatedFromGit"):
+        flags.append("git")
+    suffix = f" [{' '.join(flags)}]" if flags else ""
+    return f"  {workspace_id:<30} {access_level:<8} {name}{suffix}"
+
+
+VFS_ENTITY_PAYLOAD_KEYS = {
+    "NOTEBOOK": "notebook",
+    "FOLDER": "folder",
+    "STATIC_REPORT": "staticReport",
+    "INTERACTIVE_REPORT": "interactiveReport",
+}
+
+
+def unwrap_vfs_entity(value):
+    if not isinstance(value, dict):
+        return None, {}
+    entity = value.get("entity", value)
+    if not isinstance(entity, dict):
+        return None, {}
+
+    entity_type = entity.get("type")
+    payload_key = VFS_ENTITY_PAYLOAD_KEYS.get(entity_type)
+    if payload_key and isinstance(entity.get(payload_key), dict):
+        return entity_type, entity[payload_key]
+
+    for candidate_type, candidate_key in VFS_ENTITY_PAYLOAD_KEYS.items():
+        if isinstance(entity.get(candidate_key), dict):
+            return candidate_type, entity[candidate_key]
+    return entity_type, entity
+
+
+def infer_workspace_entry_type(value):
+    entity_type, entity = unwrap_vfs_entity(value)
+    if entity_type:
+        return entity_type
+    if not entity:
+        return "ENTRY"
+    if "entityId" in entity:
+        return "FOLDER"
+    if "kernelType" in entity or "kernelName" in entity:
+        return "NOTEBOOK"
+    return "ENTRY"
+
+
+def format_workspace_entry_line(entry):
+    entity_type, entity = unwrap_vfs_entity(entry)
+    entity_type = entity_type or infer_workspace_entry_type(entity)
+    access_level = entry.get("accessLevel") or entry.get("personalAccessLevel") or "?"
+    entity_id = extract_vfs_id(entity)
+    name = entity.get("name", "?")
+    return f"  {entity_type:<10} {entity_id:<30} {access_level:<8} {name}"
+
+
+def format_workspace_report_line(report):
+    entity_type, entity = unwrap_vfs_entity(report.get("vfsFile", report))
+    report_type = "STATIC" if entity_type == "STATIC_REPORT" or entity.get("reportFormat") == "STATIC" else "INTERACTIVE"
+    entity_id = extract_vfs_id(entity)
+    name = entity.get("name", "?")
+    access_level = report.get("accessLevel") or report.get("personalAccessLevel") or "?"
+    return f"  {report_type:<12} {entity_id:<30} {access_level:<8} {name}"
+
+
+def format_breadcrumb_line(entry):
+    entity_type, entity = unwrap_vfs_entity(entry)
+    entity_type = entity_type or infer_workspace_entry_type(entity)
+    entity_id = extract_vfs_id(entity)
+    name = entity.get("name", "?")
+    return f"  {entity_type:<10} {entity_id:<30} {name}"
+
+
+def print_workspace_entries(entries):
+    if not entries:
+        print("No entries.")
+        return
+    for entry in entries:
+        print(format_workspace_entry_line(entry))
+
+
+def print_workspace_reports(reports):
+    if not reports:
+        print("No reports.")
+        return
+    for report in reports:
+        print(format_workspace_report_line(report))
 
 
 # --------------------------------------------------------------------------- #
@@ -815,7 +2119,7 @@ def wait_for_completion(session, cell_id, timeout):
         time.sleep(interval)
         elapsed = time.monotonic() + timeout - deadline
         print(f"  Waiting for cell {cell_id}... [{elapsed:.1f}s]", file=sys.stderr, end="\r")
-        body = api_post(session, "/cell/outputs", payload)
+        body = notebook_api_post(session, "/cell/outputs", payload)
         status = body.get("executionStatus", "")
         if is_terminal(status):
             print(file=sys.stderr)  # clear the waiting line
@@ -850,124 +2154,199 @@ def read_source(args_source=None):
 # Command handlers
 # --------------------------------------------------------------------------- #
 
+def require_scope_workspace_id(scope, workspace_id):
+    if scope in WORKSPACE_SCOPES and not workspace_id:
+        sys.exit(f"--workspace-id is required for --scope {scope}.")
+    if scope not in WORKSPACE_SCOPES and workspace_id:
+        sys.exit(f"--workspace-id is only supported with workspace scope: {WORKSPACE_SCOPE}.")
+
+
+def notebook_context_for_scope(scope, notebook_id, owner_id, internal_id):
+    if not notebook_id:
+        return owner_id, internal_id
+    if scope not in WORKSPACE_SCOPES:
+        sys.exit(f"--notebook-id is only supported with workspace scope: {WORKSPACE_SCOPE}.")
+    return parse_slash_id(notebook_id, "notebookId")
+
+
 def cmd_init(args):
-    scheme, host, owner_id, notebook_id = parse_notebook_url(args.url)
+    scope = getattr(args, "scope", NOTEBOOK_API_SCOPE)
+    access = parse_auth_access(getattr(args, "access", DEFAULT_AUTH_ACCESS.lower()))
+    scheme, host, owner_id, notebook_id, parsed_workspace_id = parse_target_url(args.url, scope)
+    workspace_id = getattr(args, "workspace_id", None) or parsed_workspace_id
+    require_scope_workspace_id(scope, workspace_id)
+    owner_id, notebook_id = notebook_context_for_scope(
+        scope,
+        getattr(args, "notebook_id", None),
+        owner_id,
+        notebook_id,
+    )
     if args.api_token_stdin and get_env_api_token():
         reject_api_token_stdin_env_conflict()
     explicit_api_token = read_api_token_from_stdin() if args.api_token_stdin else None
 
     if explicit_api_token is not None or get_env_api_token():
+        require_scope_compatibility(scheme, host, scope)
         api_token, should_save_credentials, can_renew_keychain_token = resolve_credentials_for_init(
             host,
             owner_id,
             notebook_id,
             explicit_api_token,
+            scope,
+            workspace_id,
+            access,
         )
         initialize_session_with_token(
             scheme,
             host,
             owner_id,
             notebook_id,
+            scope,
+            workspace_id,
+            access,
             api_token,
             should_save_credentials,
             can_renew_keychain_token,
         )
         return
 
-    api_token = get_keychain_credentials(host, owner_id, notebook_id)
+    api_token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
     if api_token:
-        initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, api_token)
+        initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, scope, workspace_id, access, api_token)
         return
 
-    initialize_session_with_oauth(scheme, host, owner_id, notebook_id)
+    initialize_session_with_oauth(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
 
 def cmd_logout(args):
     if args.url:
-        _scheme, host, owner_id, notebook_id = parse_notebook_url(args.url)
+        scope = getattr(args, "scope", NOTEBOOK_API_SCOPE)
+        access = parse_auth_access(getattr(args, "access", DEFAULT_AUTH_ACCESS.lower()))
+        _scheme, host, owner_id, notebook_id, parsed_workspace_id = parse_target_url(args.url, scope)
+        workspace_id = getattr(args, "workspace_id", None) or parsed_workspace_id
+        require_scope_workspace_id(scope, workspace_id)
     else:
-        _scheme, host, owner_id, notebook_id = load_session_identity()
-    delete_credentials(host, owner_id, notebook_id)
+        _scheme, host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
+    delete_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
     delete_session()
-    print(f"Logged out from notebook {notebook_id} on {host}")
+    print(f"Logged out from scope {scope} on {host}")
 
 
 def initialize_session_with_token(
-    scheme,
-    host,
-    owner_id,
-    notebook_id,
-    api_token,
-    should_save_credentials,
-    can_renew_keychain_token,
+        scheme,
+        host,
+        owner_id,
+        notebook_id,
+        scope,
+        workspace_id,
+        access,
+        api_token,
+        should_save_credentials,
+        can_renew_keychain_token,
 ):
-    status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
+    status, body, headers = check_init_token(scheme, host, owner_id, notebook_id, api_token, scope, workspace_id, access)
+    if status not in (0, 401):
+        require_matching_workspace_agent_skill_version(scope, headers)
     if status == 401 and can_renew_keychain_token:
         print("\n  Saved API token is invalid or expired. Enter a replacement token.\n", file=sys.stderr)
         api_token = prompt_credentials(
             host,
             owner_id,
             notebook_id,
+            scope,
+            workspace_id,
+            access,
             "Saved API token is invalid or expired",
         )
         should_save_credentials = True
-        status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
+        status, body, headers = check_init_token(scheme, host, owner_id, notebook_id, api_token, scope, workspace_id, access)
+        if status not in (0, 401):
+            require_matching_workspace_agent_skill_version(scope, headers)
     if status == 0:
         sys.exit(f"API request failed: {body}")
     if status >= 400:
-        sys.exit(format_api_error("API error", status, body))
+        session = Session(host, owner_id, notebook_id, api_token, scheme, scope, workspace_id, access)
+        sys.exit(format_api_error("API error", status, body, headers, session))
 
     if should_save_credentials:
-        save_credentials(host, owner_id, notebook_id, api_token)
+        save_credentials(host, owner_id, notebook_id, api_token, scope, workspace_id, access)
 
-    save_initialized_session(scheme, host, owner_id, notebook_id)
+    save_initialized_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
 
-def initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, api_token):
-    status, body = check_init_token(scheme, host, owner_id, notebook_id, api_token)
+def initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, scope, workspace_id, access, api_token):
+    status, body, headers = check_init_token(scheme, host, owner_id, notebook_id, api_token, scope, workspace_id, access)
     if status == 0:
         sys.exit(f"API request failed: {body}")
     if status == 401:
         print("\n  Saved API token is invalid or expired. Starting browser authorization.\n", file=sys.stderr)
-        initialize_session_with_oauth(scheme, host, owner_id, notebook_id)
+        initialize_session_with_oauth(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
         return
     if status >= 400:
-        sys.exit(format_api_error("API error", status, body))
+        session = Session(host, owner_id, notebook_id, api_token, scheme, scope, workspace_id, access)
+        sys.exit(format_api_error("API error", status, body, headers, session))
 
-    save_initialized_session(scheme, host, owner_id, notebook_id)
-
-
-def check_init_token(scheme, host, owner_id, notebook_id, api_token):
-    session = Session(host, owner_id, notebook_id, api_token, scheme)
-    payload = {"notebookId": session.notebook_id_dict()}
-    return api_request(session, "/cells", payload)
+    save_initialized_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
 
-def initialize_session_with_oauth(scheme, host, owner_id, notebook_id):
+def check_init_token(scheme, host, owner_id, notebook_id, api_token, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    session = Session(host, owner_id, notebook_id, api_token, scheme, scope, workspace_id, access)
+    if scope in NOTEBOOK_SCOPES:
+        payload = {"notebookId": session.notebook_id_dict()}
+        return notebook_api_request(session, "/cells", payload)
+    if scope == USER_BASIC_SCOPE:
+        return api_request(session, USER_PUBLIC_API_PATH, "/workspaces", method="GET")
+    if scope in WORKSPACE_SCOPES:
+        return api_request(
+            session,
+            WORKSPACES_API_PATH,
+            "/entries",
+            method="GET",
+            params={"workspaceId": session.workspace_id},
+        )
+    sys.exit(f"Unsupported scope: {scope}")
+
+
+def initialize_session_with_oauth(scheme, host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    require_scope_compatibility(scheme, host, scope)
     pkce_pair = generate_pkce_pair()
     state = generate_oauth_state()
-    redirect_uri, callback = request_oauth_authorization(scheme, host, owner_id, notebook_id, pkce_pair, state)
+    redirect_uri, callback = request_oauth_authorization(
+        scheme,
+        host,
+        owner_id,
+        notebook_id,
+        workspace_id,
+        scope,
+        access,
+        pkce_pair,
+        state,
+    )
     if callback.error:
         sys.exit(callback.message)
 
     api_token = exchange_oauth_code_for_token(scheme, host, callback.code, redirect_uri, pkce_pair.verifier)
-    session = Session(host, owner_id, notebook_id, api_token, scheme)
-    payload = {"notebookId": session.notebook_id_dict()}
-    status, body = api_request(session, "/cells", payload)
+    status, body, headers = check_init_token(scheme, host, owner_id, notebook_id, api_token, scope, workspace_id, access)
     if status == 0:
         sys.exit(f"API request failed: {body}")
     if status >= 400:
-        sys.exit(format_api_error("API error", status, body))
+        session = Session(host, owner_id, notebook_id, api_token, scheme, scope, workspace_id, access)
+        sys.exit(format_api_error("API error", status, body, headers, session))
 
-    save_credentials(host, owner_id, notebook_id, api_token)
-    save_initialized_session(scheme, host, owner_id, notebook_id)
+    save_credentials(host, owner_id, notebook_id, api_token, scope, workspace_id, access)
+    save_initialized_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
 
-def save_initialized_session(scheme, host, owner_id, notebook_id):
-    save_session(scheme, host, owner_id, notebook_id)
-    print(f"Session saved for notebook {notebook_id} on {host}")
-    print(f"  Owner:    {owner_id}")
-    print(f"  Notebook: {notebook_id}")
+def save_initialized_session(scheme, host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+    save_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
+    print(f"Session saved for scope {scope} on {host}")
+    if owner_id:
+        print(f"  Owner:    {owner_id}")
+    if notebook_id:
+        print(f"  Notebook: {notebook_id}")
+    if workspace_id:
+        print(f"  Workspace: {workspace_id}")
+        print(f"  Access:    {auth_access_display(access)}")
     print(f"  File:     {SESSION_FILE}")
 
 
@@ -978,7 +2357,7 @@ def cmd_cells(args):
         payload["worksheetIndex"] = args.worksheet_index
     if args.include_outputs:
         payload["includeOutputs"] = True
-    body = api_post(session, "/cells", payload)
+    body = notebook_api_post(session, "/cells", payload)
 
     if args.json:
         print_json(body)
@@ -1011,7 +2390,7 @@ def cmd_cells(args):
     if body.get("outputsTruncated"):
         print(
             f"Outputs truncated from cell {body.get('outputsTruncatedFromCellId')}. "
-            "Use `datalore cell outputs <id>` for full output.",
+            "Use `datalore notebook cell outputs <id>` for full output.",
             file=sys.stderr,
         )
 
@@ -1028,7 +2407,7 @@ def cmd_cells_run(args):
     if timeout_ms is not None:
         payload["timeoutMs"] = timeout_ms
 
-    body = api_post(
+    body = notebook_api_post(
         session,
         "/cells/run",
         payload,
@@ -1066,7 +2445,7 @@ def cmd_worksheet_create(args):
     if args.worksheet_index is not None:
         payload["worksheetIndex"] = args.worksheet_index
 
-    body = api_post(session, "/worksheet/create", payload)
+    body = notebook_api_post(session, "/worksheet/create", payload)
 
     if args.json:
         print_json(body)
@@ -1079,10 +2458,74 @@ def cmd_worksheet_create(args):
     print(f"First cell: {body.get('firstCellId', '?')}")
 
 
+def parse_json_array_argument(value, argument_name):
+    """Parse inline JSON, @file JSON, or '-' JSON from stdin as an array."""
+    if value == "-":
+        text = sys.stdin.read()
+    elif value.startswith("@"):
+        text = Path(value[1:]).read_text()
+    else:
+        text = value
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        sys.exit(f"Invalid JSON for {argument_name}: {e}")
+    if not isinstance(parsed, list):
+        sys.exit(f"{argument_name} must be a JSON array.")
+    return parsed
+
+
+def report_request(args, endpoint, payload, required_access="READ"):
+    session = load_session()
+    command_label = f"datalore notebook report {args.report_command}"
+    require_notebook_resource_session(session, command_label, required_access=required_access)
+    payload["notebookId"] = session.notebook_id_dict()
+    body = notebook_api_post(session, endpoint, payload)
+    print_json(body)
+
+
+def cmd_report_get(args):
+    report_request(args, "/report", {})
+
+
+def cmd_report_replace(args):
+    report_request(args, "/report/replace", {"tabs": parse_json_array_argument(args.tabs_json, "--tabs-json")}, "FULL")
+
+
+def cmd_report_operation(args):
+    operation = {"type": args.report_operation_type}
+    for argument, field in args.report_operation_fields.items():
+        value = getattr(args, argument)
+        if value is not None:
+            operation[field] = value
+    report_request(args, "/report/operations", {"operations": [operation]}, "FULL")
+
+
+def cmd_report_upsert_cell(args):
+    operation = {
+        "type": "UPSERT_CELL",
+        "rowId": args.row_id,
+        "cell": parse_json_argument(args.cell_json, "--cell-json"),
+    }
+    report_request(args, "/report/operations", {"operations": [operation]}, "FULL")
+
+
+def cmd_report_publish(args):
+    payload = {
+        "type": args.type,
+        "mode": args.mode,
+        "fullWidth": args.full_width,
+        "canDownloadAndEditCopy": args.can_download_and_edit_copy,
+    }
+    if args.computation_mode is not None:
+        payload["computationMode"] = args.computation_mode
+    report_request(args, "/report/publish", payload, "FULL")
+
+
 def cmd_cell_get(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
-    body = api_post(session, "/cell", payload)
+    body = notebook_api_post(session, "/cell", payload)
 
     if args.json:
         print_json(body)
@@ -1097,7 +2540,7 @@ def cmd_cell_get(args):
 
 def get_cell_type(session, cell_id):
     payload = {"notebookId": session.notebook_id_dict(), "cellId": cell_id}
-    body = api_post(session, "/cell", payload)
+    body = notebook_api_post(session, "/cell", payload)
     cell = body.get("cell", body)
     cell_type = cell.get("cellType")
     if not cell_type:
@@ -1153,7 +2596,7 @@ def cmd_cell_create(args):
         payload["run"] = True
         payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
 
-    body = api_post(
+    body = notebook_api_post(
         session,
         "/cell/create",
         payload,
@@ -1227,7 +2670,7 @@ def cmd_cell_edit(args):
         payload["run"] = True
         payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
 
-    body = api_post(
+    body = notebook_api_post(
         session,
         "/cell/edit",
         payload,
@@ -1277,7 +2720,7 @@ def cmd_cell_run(args):
         "cellId": args.cell_id,
         "timeoutMs": timeout_ms,
     }
-    body = api_post(session, "/cell/run", payload, timeout=request_timeout_for_server_wait(timeout_ms))
+    body = notebook_api_post(session, "/cell/run", payload, timeout=request_timeout_for_server_wait(timeout_ms))
 
     if args.json:
         print_json(body)
@@ -1303,7 +2746,7 @@ def cmd_cell_run(args):
 def cmd_cell_outputs(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
-    body = api_post(session, "/cell/outputs", payload)
+    body = notebook_api_post(session, "/cell/outputs", payload)
 
     if args.json:
         print_json(body)
@@ -1315,11 +2758,11 @@ def cmd_cell_outputs(args):
 def cmd_cell_delete(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "cellId": args.cell_id}
-    status, body = api_request(session, "/cell/delete", payload)
+    status, body, headers = notebook_api_request(session, "/cell/delete", payload)
     if status == 0:
         sys.exit(f"Failed to delete cell: {body}")
     if status >= 400:
-        sys.exit(format_api_error(f"Failed to delete cell {args.cell_id}", status, body))
+        sys.exit(format_api_error(f"Failed to delete cell {args.cell_id}", status, body, headers, session))
     if args.json:
         print_json({"deleted": True, "cellId": args.cell_id})
         return
@@ -1342,7 +2785,7 @@ def cmd_cell_update_control(args):
         payload["run"] = True
         payload["timeoutMs"] = api_wait_timeout_ms(args.timeout)
 
-    body = api_post(
+    body = notebook_api_post(
         session,
         "/cell/controls/update",
         payload,
@@ -1380,7 +2823,7 @@ def cmd_definitions(args):
         "line": args.line,
         "column": args.column,
     }
-    body = api_post(session, "/definitions", payload)
+    body = notebook_api_post(session, "/definitions", payload)
 
     if args.json:
         print_json(body)
@@ -1400,12 +2843,292 @@ def cmd_definitions(args):
     print("Definition: " + " ".join(location))
 
 
+def cmd_workspaces(args):
+    session = load_session()
+    body = user_api_get(session, "/workspaces")
+
+    if args.json:
+        print_json(body)
+        return
+
+    if not body:
+        print("No workspaces.")
+        return
+
+    for workspace_view in body:
+        print(format_workspace_line(workspace_view))
+
+
+def cmd_workspace_info(args):
+    session = load_session()
+    body = workspace_api_get(session, "/workspace", params={"workspaceId": session.workspace_id})
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(format_workspace_line(body))
+
+
+def cmd_workspace_entries(args):
+    session = load_session()
+    body = workspace_api_get(session, "/entries", params={"workspaceId": session.workspace_id})
+
+    if args.json:
+        print_json(body)
+        return
+
+    print_workspace_entries(body)
+
+
+def cmd_workspace_folder_entries(args):
+    session = load_session()
+    body = workspace_api_get(
+        session,
+        "/folder-entries",
+        params={"workspaceId": session.workspace_id, "folderId": args.folder_id},
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print_workspace_entries(body)
+
+
+def cmd_workspace_reports(args):
+    session = load_session()
+    body = workspace_api_get(session, "/reports", params={"workspaceId": session.workspace_id})
+
+    if args.json:
+        print_json(body)
+        return
+
+    print_workspace_reports(body)
+
+
+def cmd_workspace_file(args):
+    session = load_session()
+    body = workspace_api_get(
+        session,
+        "/file",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id},
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(format_workspace_entry_line(body.get("vfsFile", {})))
+
+
+def cmd_workspace_breadcrumbs(args):
+    session = load_session()
+    body = workspace_api_get(
+        session,
+        "/breadcrumbs",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id},
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    if not body:
+        print("No breadcrumb.")
+        return
+
+    for entry in body:
+        print(format_breadcrumb_line(entry))
+
+
+def cmd_workspace_folder(args):
+    session = load_session()
+    body = workspace_api_get(
+        session,
+        "/folder",
+        params={"workspaceId": session.workspace_id, "folderId": args.folder_id},
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(format_workspace_entry_line(body.get("vfsFolder", {})))
+    print("Breadcrumb:")
+    for entry in body.get("breadcrumb", []):
+        print(format_breadcrumb_line(entry))
+    print("Children:")
+    print_workspace_entries(body.get("children", []))
+
+
+def cmd_workspace_mkdir(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace mkdir", "CREATE")
+    params = {"workspaceId": session.workspace_id, "name": args.name}
+    if args.parent_id:
+        params["parentId"] = args.parent_id
+    body = workspace_api_post(session, "/folder", params=params, error_prefix="Failed to create folder")
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_create_notebook(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace create-notebook", "CREATE")
+    params = {"workspaceId": session.workspace_id, "name": args.name, "language": args.language.upper()}
+    if args.parent_id:
+        params["parentId"] = args.parent_id
+    body = workspace_api_post(session, "/notebook", params=params, error_prefix="Failed to create notebook")
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_rename(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace rename", "FULL")
+    body = workspace_api_post(
+        session,
+        "/rename",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id, "name": args.name},
+        error_prefix="Failed to rename entity",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_move(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace move", "FULL")
+    body = workspace_api_post(
+        session,
+        "/move",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id, "parentId": args.parent_id},
+        error_prefix="Failed to move entity",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_move_to_trash(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace move-to-trash", "FULL")
+    body = workspace_api_post(
+        session,
+        "/trash/move",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id},
+        error_prefix="Failed to move entity to trash",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_remove_from_trash(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace remove-from-trash", "FULL")
+    body = workspace_api_post(
+        session,
+        "/trash/remove",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id},
+        error_prefix="Failed to remove entity from trash",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_restore_from_trash(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace restore-from-trash", "FULL")
+    body = workspace_api_post(
+        session,
+        "/trash/restore",
+        params={"workspaceId": session.workspace_id, "entityId": args.entity_id},
+        error_prefix="Failed to restore entity from trash",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_empty_trash(args):
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace empty-trash", "FULL")
+    body = workspace_api_post(
+        session,
+        "/trash/empty",
+        params={"workspaceId": session.workspace_id},
+        error_prefix="Failed to empty trash",
+    )
+
+    if args.json:
+        print_json(body)
+        return
+
+    print(extract_vfs_id(body))
+
+
+def cmd_workspace_database_query(args):
+    session = load_session()
+    command_label = "datalore workspace database query"
+    require_workspace_resource_session(session, command_label, "FULL")
+    status, body, headers = workspace_api_post_raw(
+        session,
+        "/database/query",
+        args.query,
+        params={
+            "workspaceId": session.workspace_id,
+            "databaseId": args.database_id,
+            "name": args.name,
+        },
+        timeout=transfer_request_timeout(),
+        content_type="text/plain",
+    )
+    if status == 0:
+        sys.exit(f"Failed to execute database query: {body}")
+    if status >= 400:
+        sys.exit(format_api_error("Failed to execute database query", status, body, headers, session))
+    try:
+        with body:
+            for chunk in body.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
+                if chunk:
+                    sys.stdout.buffer.write(chunk)
+    except requests.RequestException as e:
+        sys.exit(f"Failed to execute database query: {e}")
+
+
 def cmd_files(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict()}
     if args.directory:
         payload["directory"] = args.directory
-    body = api_post(session, "/files", payload)
+    body = notebook_api_post(session, "/files", payload)
 
     if args.json:
         print_json(body)
@@ -1429,11 +3152,11 @@ def cmd_files(args):
 def cmd_file_read(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
-    status, body = api_request(session, "/file", payload, raw=True, timeout=transfer_request_timeout())
+    status, body, headers = notebook_api_request(session, "/file", payload, raw=True, timeout=transfer_request_timeout())
     if status == 0:
         sys.exit(f"Failed to read file {args.path}: {body}")
     if status >= 400:
-        sys.exit(format_api_error(f"Failed to read file {args.path}", status, body))
+        sys.exit(format_api_error(f"Failed to read file {args.path}", status, body, headers, session))
     try:
         with body:
             for chunk in body.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE_BYTES):
@@ -1453,7 +3176,7 @@ def cmd_file_text(args):
     if args.max_lines is not None:
         payload["maxLines"] = args.max_lines
 
-    body = api_post(session, "/file/read", payload)
+    body = notebook_api_post(session, "/file/read", payload)
 
     if args.json:
         print_json(body)
@@ -1493,11 +3216,11 @@ def cmd_file_upload(args):
 def cmd_file_delete(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
-    status, body = api_request(session, "/file/delete", payload)
+    status, body, headers = notebook_api_request(session, "/file/delete", payload)
     if status == 0:
         sys.exit(f"Failed to delete file: {body}")
     if status >= 400:
-        sys.exit(format_api_error(f"Failed to delete file {args.path}", status, body))
+        sys.exit(format_api_error(f"Failed to delete file {args.path}", status, body, headers, session))
     if args.json:
         print_json({"deleted": True, "filePath": args.path})
         return
@@ -1507,7 +3230,7 @@ def cmd_file_delete(args):
 def cmd_file_exists(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict(), "filePath": args.path}
-    body = api_post(session, "/file/exists", payload)
+    body = notebook_api_post(session, "/file/exists", payload)
 
     if args.json:
         print_json(body)
@@ -1519,10 +3242,10 @@ def cmd_file_exists(args):
         sys.exit(1)
 
 
-def cmd_databases(args):
+def cmd_attached_databases(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict()}
-    body = api_post(session, "/databases", payload)
+    body = notebook_api_post(session, "/databases", payload)
 
     if args.json:
         print_json(body)
@@ -1552,7 +3275,7 @@ def cmd_db_schema(args):
     if args.verbosity:
         payload["verbosity"] = args.verbosity
 
-    body = api_post(session, "/database/schema/children", payload)
+    body = notebook_api_post(session, "/database/schema/children", payload)
 
     if args.json:
         print_json(body)
@@ -1600,7 +3323,7 @@ def cmd_db_search(args):
     if args.verbosity:
         payload["verbosity"] = args.verbosity
 
-    body = api_post(session, "/database/schema/search", payload)
+    body = notebook_api_post(session, "/database/schema/search", payload)
 
     if args.json:
         print_json(body)
@@ -1629,7 +3352,7 @@ def cmd_db_condensed(args):
         "notebookId": session.notebook_id_dict(),
         "databaseId": args.database_id,
     }
-    body = api_post(session, "/database/schema/condensed", payload)
+    body = notebook_api_post(session, "/database/schema/condensed", payload)
 
     if args.json:
         print_json(body)
@@ -1643,7 +3366,7 @@ def cmd_db_condensed(args):
 def cmd_kernel_status(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict()}
-    body = api_post(session, "/kernel/status", payload)
+    body = notebook_api_post(session, "/kernel/status", payload)
 
     if args.json:
         print_json(body)
@@ -1665,7 +3388,7 @@ def cmd_kernel_restart(args):
         payload["waitUntilReady"] = True
         payload["waitTimeoutMs"] = args.timeout_ms
 
-    body = api_post(
+    body = notebook_api_post(
         session,
         "/kernel/restart",
         payload,
@@ -1685,7 +3408,7 @@ def cmd_kernel_restart(args):
 def cmd_kernel_interrupt(args):
     session = load_session()
     payload = {"notebookId": session.notebook_id_dict()}
-    body = api_post(session, "/kernel/interrupt", payload)
+    body = notebook_api_post(session, "/kernel/interrupt", payload)
 
     if args.json:
         print_json(body)
@@ -1695,14 +3418,183 @@ def cmd_kernel_interrupt(args):
     print("Interrupted running cell." if interrupted else "No running cell to interrupt.")
 
 
+def cmd_agent_stop(args):
+    session = load_session()
+    payload = {"notebookId": session.notebook_id_dict()}
+    notebook_api_post(session, "/agent/stop", payload)
+
+    if args.json:
+        print_json({"stopped": True})
+        return
+
+    print("Agent stopped.")
+
+
 # --------------------------------------------------------------------------- #
 # Argument parser
 # --------------------------------------------------------------------------- #
 
+def _add_resource_subparser(sub, resource_type, help_text):
+    """Add a type-specific resource subparser with standard subcommands."""
+    p_res = sub.add_parser(resource_type, help=help_text)
+    res_sub = p_res.add_subparsers(dest="resource_command")
+
+    p = res_sub.add_parser("list", help="List all resources")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("get", help="Get a resource by ID")
+    p.add_argument("resource_id", help="Resource UUID")
+
+    if resource_type == "databases":
+        p = res_sub.add_parser("drivers", help="List available database drivers")
+        add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("create", help="Create a new resource")
+    if resource_type == "databases":
+        p.add_argument("--name", required=True, help="Display name")
+        p.add_argument("--driver-id", required=True, help="Driver ID")
+        p.add_argument("--driver-kind", choices=["predefined", "custom"], default="predefined",
+                       help="Driver kind (default: predefined)")
+        p.add_argument("--auth-provider-id", default="user-pass", help="Auth provider ID (default: user-pass)")
+        p.add_argument("--user-name", help="Database user name")
+        p.add_argument("--password", help="Database password")
+        p.add_argument("--param", action="append", default=[], metavar="KEY=VALUE",
+                       help="Database parameter; repeatable")
+        p.add_argument("--param-group-id", type=int, default=0, help="Connection parameter group ID (default: 0)")
+        p.add_argument("--additional", action="append", default=[], metavar="KEY=VALUE",
+                       help="Database auth/additional property; repeatable")
+        p.add_argument("--additional-file", action="append", default=[], metavar="FIELD=PATH",
+                       help="Database auth file field; stores FIELD=file name and file content in keys")
+        p.add_argument("--key", action="append", default=[], metavar="KEY=VALUE",
+                       help="Database key payload entry; repeatable")
+        p.add_argument("--key-file", action="append", default=[], metavar="KEY=PATH",
+                       help="Database key payload loaded from file; repeatable")
+        p.add_argument("--advanced", action="append", default=[], metavar="KEY=VALUE",
+                       help="Advanced property; repeatable")
+        p.add_argument("--save-tokens", action=argparse.BooleanOptionalAction, default=None,
+                       help="Set SaveTokens additional property")
+        p.add_argument("--ssh-host", help="SSH tunnel host")
+        p.add_argument("--ssh-port", type=int, help="SSH tunnel port (default: 22 when SSH is enabled)")
+        p.add_argument("--ssh-user", help="SSH tunnel user")
+        p.add_argument("--ssh-password", help="SSH tunnel password")
+        p.add_argument("--ssh-key-id", help="SSH key ID for SSH tunnel key-pair auth")
+        p.add_argument("--ssh-auth", choices=["password", "key-pair"],
+                       help="SSH authentication type; inferred from provided credentials by default")
+        p.add_argument("--vm-options", help="JVM options")
+        p.add_argument("--use-experimental-session", action=argparse.BooleanOptionalAction, default=True,
+                       help="Use experimental SQL session (default: enabled)")
+    elif resource_type == "datasources":
+        p.add_argument("--name", required=True, help="Display name")
+        p.add_argument("--kind", required=True, choices=["S3", "GCS", "GD", "SMB/CIFS"],
+                       help="Datasource kind")
+        p.add_argument("--field", action="append", default=[], metavar="KEY=VALUE",
+                       help="Datasource field; repeatable")
+        p.add_argument("--field-file", action="append", default=[], metavar="KEY=PATH",
+                       help="Datasource field value loaded from file content; repeatable")
+    elif resource_type == "environments":
+        p.add_argument("--name", required=True, help="Display name")
+        p.add_argument("--variable", action="append", default=[], metavar="KEY=VALUE",
+                       help="Environment variable; repeatable")
+    elif resource_type == "git-repositories":
+        p.add_argument("--name", required=True, help="Display name")
+        p.add_argument("--url", required=True, help="Repository URL")
+        p.add_argument("--ssh-key-id", help="SSH key ID for SSH repository access")
+        p.add_argument("--default-reference", default="HEAD", help="Default git reference (default: HEAD)")
+        p.add_argument("--default-reference-type", choices=["head", "branch", "tag", "commit", "unknown"],
+                       help="Default reference type (default: head for HEAD, otherwise branch)")
+    elif resource_type == "ssh-keys":
+        p.add_argument("--name", help="Display name")
+        create_mode = p.add_mutually_exclusive_group(required=True)
+        create_mode.add_argument("--private-key", help="SSH private key text")
+        create_mode.add_argument("--private-key-file", help="Read SSH private key from file")
+        create_mode.add_argument("--generate", choices=["rsa", "ed25519"],
+                                 help="Generate a new SSH key pair")
+    else:
+        p.add_argument("resource_json", help="Resource JSON (string or file path)")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("update", help="Update an existing resource")
+    p.add_argument("resource_json", help="Resource JSON with ID (string or file path)")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("delete", help="Delete a resource")
+    p.add_argument("resource_id", help="Resource UUID")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("search", help="Search resources by name")
+    p.add_argument("query", help="Search query (case-insensitive substring)")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("usage", help="List where a resource is used")
+    p.add_argument("resource_id", help="Resource UUID")
+    p.add_argument("--match-duplicates", action="store_true", help="Include duplicate usages")
+    add_inheritable_json_flag(p)
+
+    p = res_sub.add_parser("clone", help="Clone a resource to current workspace")
+    p.add_argument("resource_id", help="Resource UUID to clone")
+    p.add_argument("--new-name", help="New name for the cloned resource")
+
+
+def _add_notebook_resource_attachment_subparser(sub, resource_type, help_text):
+    """Add notebook-scoped attachment commands for one resource type."""
+    attachment_capabilities = RESOURCE_ATTACHMENT_CAPABILITIES.get(resource_type, {})
+    if not any(attachment_capabilities.values()):
+        return
+
+    p_res = sub.add_parser(resource_type, help=help_text)
+    res_sub = p_res.add_subparsers(dest="notebook_resource_command")
+
+    if attachment_capabilities.get("attached"):
+        p = res_sub.add_parser("attached", help="List resources attached to the current notebook")
+        p.add_argument("--notebook-id", default=argparse.SUPPRESS,
+                       help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context")
+        add_inheritable_json_flag(p)
+
+    if attachment_capabilities.get("get-attached"):
+        p = res_sub.add_parser("get-attached", help="Get one resource attachment in the current notebook")
+        p.add_argument("resource_id", help="Resource UUID")
+        p.add_argument("--notebook-id", default=argparse.SUPPRESS,
+                       help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context")
+        add_inheritable_json_flag(p)
+
+    if attachment_capabilities.get("attach"):
+        p = res_sub.add_parser("attach", help="Attach a resource to the current notebook")
+        p.add_argument("resource_id", help="Resource UUID")
+        p.add_argument("--notebook-id", default=argparse.SUPPRESS,
+                       help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context")
+        if resource_type in RESOURCE_TYPES_WITH_CUSTOM_ATTACHMENT_OPTIONS:
+            p.add_argument(
+                "--attachment-options",
+                dest="attachment_options_json",
+                help="Attachment options JSON object, @file, or '-' from stdin",
+            )
+        add_inheritable_json_flag(p)
+
+    if attachment_capabilities.get("update-attachment"):
+        p = res_sub.add_parser("update-attachment", help="Update resource attachment options in the current notebook")
+        p.add_argument("resource_id", help="Resource UUID")
+        p.add_argument("--notebook-id", default=argparse.SUPPRESS,
+                       help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context")
+        p.add_argument(
+            "--attachment-options",
+            dest="attachment_options_json",
+            required=True,
+            help="Attachment options JSON object, @file, or '-' from stdin",
+        )
+        add_inheritable_json_flag(p)
+
+    if attachment_capabilities.get("detach"):
+        p = res_sub.add_parser("detach", help="Detach a resource from the current notebook")
+        p.add_argument("resource_id", help="Resource UUID")
+        p.add_argument("--notebook-id", default=argparse.SUPPRESS,
+                       help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context")
+        add_inheritable_json_flag(p)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="datalore",
-        description="Datalore notebook CLI — manage cells, files, and databases.",
+        description="Datalore CLI — manage sessions, workspaces, notebook content, and workspace resources.",
     )
     parser.add_argument("--json", action="store_true", help="Output raw JSON responses")
     parser.add_argument("--verbose", action="store_true", help="Print HTTP requests to stderr")
@@ -1710,17 +3602,124 @@ def build_parser():
     sub = parser.add_subparsers(dest="command")
 
     # -- init ---------------------------------------------------------------- #
-    p = sub.add_parser("init", help="Initialize session from notebook URL")
-    p.add_argument("url", help="Notebook URL (https://<host>/notebook/<owner>/<id>/...)")
+    p = sub.add_parser("init", help="Initialize a session from a notebook, workspace, or host URL")
+    p.add_argument(
+        "url",
+        help=(
+            "Target URL. Use a notebook URL for notebook_api or notebook_with_workspace_view, a workspace URL for "
+            "workspace scope, and the host root URL for user_basic."
+        ),
+    )
+    p.add_argument(
+        "--scope",
+        choices=sorted(SUPPORTED_OAUTH_SCOPES),
+        default=NOTEBOOK_API_SCOPE,
+        help=f"Authorization scope (default: {NOTEBOOK_API_SCOPE})",
+    )
+    p.add_argument("--workspace-id", help="Workspace ID (<ownerId>/<workspaceId>) for workspace scopes")
+    p.add_argument("--notebook-id", help="Optional notebook context (<ownerId>/<notebookId>) for workspace scope")
+    p.add_argument(
+        "--access",
+        choices=sorted(SUPPORTED_AUTH_ACCESS),
+        default=DEFAULT_AUTH_ACCESS.lower(),
+        help=f"Authorization access for workspace scope (default: {DEFAULT_AUTH_ACCESS.lower()})",
+    )
     p.add_argument("--api-token-stdin", action="store_true",
                    help="Read API token from stdin instead of prompting")
 
     # -- logout -------------------------------------------------------------- #
-    p = sub.add_parser("logout", help="Delete saved notebook credentials and session")
-    p.add_argument("url", nargs="?", help="Notebook URL (defaults to current .datalore-session)")
+    p = sub.add_parser("logout", help="Delete saved credentials and the current session file")
+    p.add_argument("url", nargs="?", help="Scope-dependent URL (defaults to current .datalore-session)")
+    p.add_argument(
+        "--scope",
+        choices=sorted(SUPPORTED_OAUTH_SCOPES),
+        default=NOTEBOOK_API_SCOPE,
+        help=f"Credential scope to delete when --url is provided (default: {NOTEBOOK_API_SCOPE})",
+    )
+    p.add_argument("--workspace-id", help="Workspace ID (<ownerId>/<workspaceId>) for workspace scopes")
+    p.add_argument(
+        "--access",
+        choices=sorted(SUPPORTED_AUTH_ACCESS),
+        default=DEFAULT_AUTH_ACCESS.lower(),
+        help=f"Authorization access for workspace scope (default: {DEFAULT_AUTH_ACCESS.lower()})",
+    )
 
-    # -- cells --------------------------------------------------------------- #
-    p_cells = sub.add_parser("cells", help="List or run notebook cells")
+    # -- workspaces ---------------------------------------------------------- #
+    sub.add_parser("workspaces", help="List own workspaces")
+
+    # -- workspace ----------------------------------------------------------- #
+    p_workspace = sub.add_parser("workspace", help="Workspace-scoped operations and resources")
+    p_workspace.add_argument(
+        "--workspace-id",
+        help="Target workspace ID (<ownerId>/<workspaceId>); overrides workspace context for any workspace command",
+    )
+    workspace_sub = p_workspace.add_subparsers(dest="workspace_command")
+
+    workspace_sub.add_parser("info", help="Show current workspace metadata")
+    workspace_sub.add_parser("entries", help="List direct entries of the current workspace")
+    workspace_sub.add_parser("reports", help="List all reports in the current workspace")
+    p = workspace_sub.add_parser("file", help="Show file/notebook metadata")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p = workspace_sub.add_parser("breadcrumbs", help="Show breadcrumbs for an entity")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p = workspace_sub.add_parser("folder", help="Show folder metadata, breadcrumb, and direct children")
+    p.add_argument("folder_id", help="Folder ID (<ownerId>/<folderId>)")
+    p = workspace_sub.add_parser("folder-entries", help="List direct entries of a folder in the current workspace")
+    p.add_argument("folder_id", help="Folder ID (<ownerId>/<folderId>)")
+    p = workspace_sub.add_parser("mkdir", help="Create a folder in the current workspace")
+    p.add_argument("name", help="Folder name")
+    p.add_argument("--parent", dest="parent_id", help="Parent folder ID (<ownerId>/<folderId>)")
+    p = workspace_sub.add_parser("create-notebook", help="Create a notebook in the current workspace")
+    p.add_argument("name", help="Notebook name")
+    p.add_argument("--parent", dest="parent_id", help="Parent folder ID (<ownerId>/<folderId>)")
+    p.add_argument("--language", default="python", help="Notebook language (default: python)")
+    p = workspace_sub.add_parser("rename", help="Rename a notebook or folder")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p.add_argument("name", help="New name")
+    p = workspace_sub.add_parser("move", help="Move a notebook or folder")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p.add_argument("parent_id", help="Destination folder ID (<ownerId>/<folderId>)")
+    p = workspace_sub.add_parser("move-to-trash", help="Move an entity to trash")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p = workspace_sub.add_parser("remove-from-trash", help="Permanently remove an entity from trash")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    p = workspace_sub.add_parser("restore-from-trash", help="Restore an entity from trash")
+    p.add_argument("entity_id", help="Entity ID (<ownerId>/<entityId>)")
+    workspace_sub.add_parser("empty-trash", help="Permanently remove all trash contents")
+
+    p_database = workspace_sub.add_parser("database", help="Workspace database query operations")
+    database_sub = p_database.add_subparsers(dest="database_command")
+    p = database_sub.add_parser("query", help="Execute SQL and write the CSV result to stdout")
+    p.add_argument(
+        "--workspace-id",
+        default=argparse.SUPPRESS,
+        help="Target workspace ID (<ownerId>/<workspaceId>); overrides workspace context",
+    )
+    p.add_argument("--database-id", required=True, help="Database ID")
+    p.add_argument("--name", required=True, help="Name for the created query")
+    p.add_argument("--query", required=True, help="SQL query string")
+
+    # -- workspace resources ------------------------------------------------- #
+    _add_resource_subparser(
+        workspace_sub,
+        "databases",
+        "Workspace database resources (not notebook-attached databases)",
+    )
+    _add_resource_subparser(workspace_sub, "datasources", "Workspace datasources")
+    _add_resource_subparser(workspace_sub, "environments", "Workspace environments")
+    _add_resource_subparser(workspace_sub, "git-repositories", "Workspace git repositories")
+    _add_resource_subparser(workspace_sub, "ssh-keys", "Workspace SSH keys")
+
+    # -- notebook ------------------------------------------------------------ #
+    p_notebook = sub.add_parser("notebook", help="Notebook-scoped operations")
+    p_notebook.add_argument(
+        "--notebook-id",
+        help="Target notebook ID (<ownerId>/<notebookId>); overrides notebook context for any notebook command",
+    )
+    notebook_sub = p_notebook.add_subparsers(dest="notebook_command")
+
+    # -- notebook cells ------------------------------------------------------ #
+    p_cells = notebook_sub.add_parser("cells", help="List or run notebook cells")
     p_cells.add_argument("--full", action="store_true", help="Include cell source code")
     p_cells.add_argument("--worksheet-index", type=int, help="Worksheet tab index (default: 0)")
     p_cells.add_argument("--include-outputs", action="store_true",
@@ -1735,7 +3734,7 @@ def build_parser():
                    help="Per-cell API wait timeout in ms (max 30000)")
 
     # -- cell ---------------------------------------------------------------- #
-    p_cell = sub.add_parser("cell", help="Cell operations")
+    p_cell = notebook_sub.add_parser("cell", help="Notebook cell operations")
     cell_sub = p_cell.add_subparsers(dest="cell_command")
 
     # cell get
@@ -1806,11 +3805,11 @@ def build_parser():
                    help=f"Max wait seconds (default: {DEFAULT_TIMEOUT})")
 
     # -- files --------------------------------------------------------------- #
-    p = sub.add_parser("files", help="List files")
+    p = notebook_sub.add_parser("files", help="List notebook files")
     p.add_argument("--directory", help="Directory to list (default: root)")
 
     # -- file ---------------------------------------------------------------- #
-    p_file = sub.add_parser("file", help="File operations")
+    p_file = notebook_sub.add_parser("file", help="Notebook file operations")
     file_sub = p_file.add_subparsers(dest="file_command")
 
     p = file_sub.add_parser("read", help="Download file to stdout")
@@ -1835,11 +3834,35 @@ def build_parser():
     p = file_sub.add_parser("exists", help="Check if file exists")
     p.add_argument("path", help="File path")
 
-    # -- databases ----------------------------------------------------------- #
-    p = sub.add_parser("databases", help="List attached databases")
+    # -- attached-databases -------------------------------------------------- #
+    p = notebook_sub.add_parser(
+        "attached-databases",
+        help="List databases, attached to the notebook",
+    )
+
+    _add_notebook_resource_attachment_subparser(
+        notebook_sub,
+        "databases",
+        "Notebook database attachments",
+    )
+    _add_notebook_resource_attachment_subparser(
+        notebook_sub,
+        "datasources",
+        "Notebook datasource attachments",
+    )
+    _add_notebook_resource_attachment_subparser(
+        notebook_sub,
+        "environments",
+        "Notebook environment attachments",
+    )
+    _add_notebook_resource_attachment_subparser(
+        notebook_sub,
+        "git-repositories",
+        "Notebook git repository attachments",
+    )
 
     # -- db ------------------------------------------------------------------ #
-    p_db = sub.add_parser("db", help="Database operations")
+    p_db = notebook_sub.add_parser("db", help="Attached database schema operations")
     db_sub = p_db.add_subparsers(dest="db_command")
 
     p = db_sub.add_parser("schema", help="Browse schema tree")
@@ -1861,7 +3884,7 @@ def build_parser():
     p.add_argument("database_id", help="Database ID")
 
     # -- kernel -------------------------------------------------------------- #
-    p_kernel = sub.add_parser("kernel", help="Kernel operations")
+    p_kernel = notebook_sub.add_parser("kernel", help="Notebook kernel operations")
     kernel_sub = p_kernel.add_subparsers(dest="kernel_command")
 
     kernel_sub.add_parser("status", help="Check kernel state")
@@ -1873,15 +3896,83 @@ def build_parser():
                    help="Kernel restart wait timeout in ms")
     kernel_sub.add_parser("interrupt", help="Interrupt execution")
 
+    # -- agent --------------------------------------------------------------- #
+    p_agent = notebook_sub.add_parser("agent", help="Notebook agent operations")
+    agent_sub = p_agent.add_subparsers(dest="agent_command")
+    agent_sub.add_parser("stop", help="Stop the notebook agent")
+
     # -- worksheet ----------------------------------------------------------- #
-    p_worksheet = sub.add_parser("worksheet", help="Worksheet operations")
+    p_worksheet = notebook_sub.add_parser("worksheet", help="Notebook worksheet operations")
     worksheet_sub = p_worksheet.add_subparsers(dest="worksheet_command")
     p = worksheet_sub.add_parser("create", help="Create a worksheet tab")
     p.add_argument("--name", help="Worksheet name")
     p.add_argument("--worksheet-index", type=int, help="Insert at worksheet tab index")
 
+    # -- report -------------------------------------------------------------- #
+    p_report = notebook_sub.add_parser("report", help="Notebook report layout and publication")
+    report_sub = p_report.add_subparsers(dest="report_command")
+    report_sub.add_parser("get", help="Get the current report layout")
+
+    p = report_sub.add_parser("replace", help="Replace the complete report layout")
+    p.add_argument("--tabs-json", required=True, help="Tabs JSON array, @file, or '-' from stdin")
+
+    p = report_sub.add_parser("add-tab", help="Add a report tab")
+    p.add_argument("--name", default="", help="Tab name (default: empty)")
+    p.add_argument("--tab-id", help="Tab ID; generated when omitted")
+    p.add_argument("--index", type=int, help="Zero-based insertion index (default: append)")
+    p.set_defaults(report_operation_type="ADD_TAB", report_operation_fields={"tab_id": "tabId", "name": "name", "index": "index"})
+
+    p = report_sub.add_parser("rename-tab", help="Rename a report tab")
+    p.add_argument("tab_id", help="Tab ID")
+    p.add_argument("name", help="New tab name")
+    p.set_defaults(report_operation_type="RENAME_TAB", report_operation_fields={"tab_id": "tabId", "name": "name"})
+
+    p = report_sub.add_parser("move-tab", help="Move a report tab")
+    p.add_argument("tab_id", help="Tab ID")
+    p.add_argument("index", type=int, help="Zero-based destination index")
+    p.set_defaults(report_operation_type="MOVE_TAB", report_operation_fields={"tab_id": "tabId", "index": "index"})
+
+    p = report_sub.add_parser("remove-tab", help="Remove a report tab and its rows")
+    p.add_argument("tab_id", help="Tab ID")
+    p.set_defaults(report_operation_type="REMOVE_TAB", report_operation_fields={"tab_id": "tabId"})
+
+    p = report_sub.add_parser("add-row", help="Add a row to a report tab")
+    p.add_argument("tab_id", help="Owning tab ID")
+    p.add_argument("--row-id", help="Row ID; generated when omitted")
+    p.add_argument("--index", type=int, help="Zero-based insertion index (default: append)")
+    p.set_defaults(report_operation_type="ADD_ROW", report_operation_fields={"tab_id": "tabId", "row_id": "rowId", "index": "index"})
+
+    p = report_sub.add_parser("move-row", help="Move a report row to a tab and index")
+    p.add_argument("row_id", help="Row ID")
+    p.add_argument("tab_id", help="Destination tab ID")
+    p.add_argument("index", type=int, help="Zero-based destination index")
+    p.set_defaults(report_operation_type="MOVE_ROW", report_operation_fields={"row_id": "rowId", "tab_id": "tabId", "index": "index"})
+
+    p = report_sub.add_parser("remove-row", help="Remove a report row and its cells")
+    p.add_argument("row_id", help="Row ID")
+    p.set_defaults(report_operation_type="REMOVE_ROW", report_operation_fields={"row_id": "rowId"})
+
+    p = report_sub.add_parser("upsert-cell", help="Add or move a cell in a report row")
+    p.add_argument("row_id", help="Target row ID")
+    p.add_argument(
+        "--cell-json",
+        required=True,
+        help="Cell layout JSON object, @file, or '-' from stdin; omit height for dynamic sizing; fixed vertical values are grid-step counts",
+    )
+
+    p = report_sub.add_parser("remove-cell", help="Remove a cell from the report")
+    p.add_argument("cell_id", help="Notebook cell ID")
+    p.set_defaults(report_operation_type="REMOVE_CELL", report_operation_fields={"cell_id": "cellId"})
+
+    p = report_sub.add_parser("publish", help="Create or update a static or interactive report")
+    p.add_argument("--type", required=True, choices=["STATIC", "INTERACTIVE"], help="Report type")
+    p.add_argument("--mode", required=True, choices=["CREATE", "UPDATE"], help="Publication mode")
+    p.add_argument("--full-width", action=argparse.BooleanOptionalAction, default=True, help="Use full report width (default: true)")
+    p.add_argument("--computation-mode", choices=["REACTIVE", "JUPYTER"], help="Interactive report computation mode")
+    p.add_argument("--can-download-and-edit-copy", action="store_true", help="Allow viewers to download and edit a copy")
+
     # -- definitions --------------------------------------------------------- #
-    p = sub.add_parser("definitions", help="Go to definition")
+    p = notebook_sub.add_parser("definitions", help="Go to definition in the current notebook")
     p.add_argument("cell_id", help="Cell ID")
     p.add_argument("line", type=int, help="1-based line")
     p.add_argument("column", type=int, help="1-based column")
@@ -1896,8 +3987,7 @@ def build_parser():
 COMMAND_MAP = {
     "init": cmd_init,
     "logout": cmd_logout,
-    "databases": cmd_databases,
-    "definitions": cmd_definitions,
+    "workspaces": cmd_workspaces,
 }
 
 CELL_COMMAND_MAP = {
@@ -1931,17 +4021,367 @@ KERNEL_COMMAND_MAP = {
     "interrupt": cmd_kernel_interrupt,
 }
 
+AGENT_COMMAND_MAP = {
+    "stop": cmd_agent_stop,
+}
+
 WORKSHEET_COMMAND_MAP = {
     "create": cmd_worksheet_create,
 }
 
+WORKSPACE_COMMAND_MAP = {
+    "info": cmd_workspace_info,
+    "entries": cmd_workspace_entries,
+    "reports": cmd_workspace_reports,
+    "file": cmd_workspace_file,
+    "breadcrumbs": cmd_workspace_breadcrumbs,
+    "folder": cmd_workspace_folder,
+    "folder-entries": cmd_workspace_folder_entries,
+    "mkdir": cmd_workspace_mkdir,
+    "create-notebook": cmd_workspace_create_notebook,
+    "rename": cmd_workspace_rename,
+    "move": cmd_workspace_move,
+    "move-to-trash": cmd_workspace_move_to_trash,
+    "remove-from-trash": cmd_workspace_remove_from_trash,
+    "restore-from-trash": cmd_workspace_restore_from_trash,
+    "empty-trash": cmd_workspace_empty_trash,
+}
+
+DATABASE_COMMAND_MAP = {
+    "query": cmd_workspace_database_query,
+}
+
+
+# --------------------------------------------------------------------------- #
+# Resource commands
+# --------------------------------------------------------------------------- #
+
+def _get_resource_type_from_command(command):
+    """Extract the resource type from a type-specific command name."""
+    return RESOURCE_API_PATHS.get(command)
+
+
+def workspace_resource_command_prefix(resource_type):
+    return f"datalore workspace {resource_type}"
+
+
+def cmd_resource_list(args):
+    """List all resources of a given type in the current workspace."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} list", "READ")
+    resource_type = args.resource_type
+    scope_id = get_workspace_scope_id(session)
+    body = resource_api_post(session, resource_type, "/all", payload=scope_id)
+    if getattr(args, "json", False):
+        print_json(body)
+        return
+    if not body:
+        print(f"No {resource_type} found.")
+        return
+    for res in body:
+        print(format_resource_line(res, resource_type))
+
+
+def cmd_resource_get(args):
+    """Get a specific resource by ID."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} get", "READ")
+    resource_type = args.resource_type
+    body = resource_api_post(session, resource_type, "/get", payload=args.resource_id)
+    print_json(body)
+
+
+def cmd_database_drivers(args):
+    """List available database drivers."""
+    session = load_session()
+    require_workspace_resource_session(session, "datalore workspace databases drivers", "READ")
+    body = resource_api_post(session, "databases", "/get-all-drivers")
+    if getattr(args, "json", False):
+        print_json(body)
+        return
+    if not body:
+        print("No database drivers found.")
+        return
+    for driver in body:
+        driver_id = driver.get("id", {})
+        if isinstance(driver_id, dict):
+            driver_id = driver_id.get("id", "?")
+        name = driver.get("name", "?")
+        source = "predefined" if driver.get("predefined") else "custom"
+        print(f"  {driver_id:<24} {name} [{source}]")
+
+
+def cmd_resource_create(args):
+    """Create a new resource."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} create", "FULL")
+    resource_type = args.resource_type
+    scope_id = get_workspace_scope_id(session)
+    resource_data = build_resource_create_payload(session, args)
+    payload = resource_request(scope_id, resource_data)
+    body = resource_api_post(session, resource_type, "/create", payload=payload)
+    if getattr(args, "json", False):
+        print_json(body)
+    else:
+        print(f"Resource created successfully.")
+
+
+def cmd_resource_update(args):
+    """Update an existing resource."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} update", "FULL")
+    resource_type = args.resource_type
+    resource_data = parse_json_argument(args.resource_json, "resource")
+    resource_data = normalize_resource_update_payload(resource_type, resource_data)
+    body = resource_api_post(session, resource_type, "/update", payload=resource_data)
+    if getattr(args, "json", False):
+        print_json(body)
+    else:
+        print(f"Resource updated successfully.")
+
+
+def cmd_resource_delete(args):
+    """Delete a resource by ID."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} delete", "FULL")
+    resource_type = args.resource_type
+    body = resource_api_post(session, resource_type, "/delete", payload=args.resource_id)
+    if getattr(args, "json", False):
+        print_json(body)
+    else:
+        print(f"Resource deleted successfully.")
+
+
+def cmd_resource_search(args):
+    """Search resources by name."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} search", "READ")
+    resource_type = args.resource_type
+    search_request = {
+        "query": args.query,
+        "workspaces": [get_workspace_id_payload(session)],
+    }
+    body = resource_api_post(session, resource_type, "/search", payload=search_request)
+    if getattr(args, "json", False):
+        print_json(body)
+        return
+    if not body:
+        print(f"No {resource_type} found matching '{args.query}'.")
+        return
+    for result in body:
+        res = result.get("resource", result)
+        print(format_resource_line(res, resource_type))
+
+
+def cmd_resource_usage(args):
+    """List where a resource is used."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} usage", "READ")
+    resource_type = args.resource_type
+    params = {"matchDuplicates": "true"} if getattr(args, "match_duplicates", False) else None
+    body = resource_api_post(session, resource_type, "/usage-list", payload=args.resource_id, params=params)
+    if getattr(args, "json", False):
+        print_json(body)
+        return
+    if not body:
+        print("No usages found.")
+        return
+    for usage in body:
+        print(format_usage_line(usage))
+
+
+def cmd_resource_clone(args):
+    """Clone a resource to new workspace scopes."""
+    session = load_session()
+    require_workspace_resource_session(session, f"{workspace_resource_command_prefix(args.resource_type)} clone", "FULL")
+    resource_type = args.resource_type
+    clone_request = {
+        "scopes": [get_workspace_scope_id(session)],
+    }
+    if args.new_name:
+        clone_request["newName"] = args.new_name
+    params = {"resource_id": args.resource_id}
+    body = resource_api_post(session, resource_type, "/clone", payload=clone_request, params=params)
+    print_json(body)
+
+
+def current_notebook_file_id(session, command_label, notebook_id=None):
+    if notebook_id:
+        owner_id, internal_id = parse_slash_id(notebook_id, "notebookId")
+        return {
+            "ownerId": owner_id,
+            "id": internal_id,
+        }
+    if session.owner_id and session.notebook_id:
+        return {
+            "ownerId": session.owner_id,
+            "id": session.notebook_id,
+        }
+    sys.exit(f"`{command_label}` requires notebook identity; pass --notebook-id <ownerId>/<notebookId>.")
+
+
+def parse_attachment_options_argument(value, argument_name):
+    if value is None:
+        return None
+    return parse_json_argument(value, argument_name)
+
+
+def require_resource_attachment_support(resource_type, command_name):
+    capabilities = RESOURCE_ATTACHMENT_CAPABILITIES.get(resource_type, {})
+    if capabilities.get(command_name):
+        return
+    sys.exit(f"{RESOURCE_TYPE_LABELS.get(resource_type, resource_type)} resources do not support `{command_name}`.")
+
+
+def cmd_resource_attached(args):
+    session = load_session()
+    command_label = f"datalore notebook {args.resource_type} attached"
+    require_resource_attachment_support(args.resource_type, "attached")
+    require_notebook_resource_session(session, command_label)
+    file_id = current_notebook_file_id(session, command_label, args.notebook_id)
+    body = resource_api_post(session, args.resource_type, "/attached-list", payload=file_id)
+    if getattr(args, "json", False):
+        print_json(body)
+        return
+    if not body:
+        print(f"No {args.resource_type} attached to {extract_vfs_id(file_id)}.")
+        return
+    for attached_resource in body:
+        print(format_attached_resource_line(attached_resource, args.resource_type))
+
+
+def cmd_resource_get_attached(args):
+    session = load_session()
+    command_label = f"datalore notebook {args.resource_type} get-attached"
+    require_resource_attachment_support(args.resource_type, "get-attached")
+    require_notebook_resource_session(session, command_label)
+    file_id = current_notebook_file_id(session, command_label, args.notebook_id)
+    body = resource_api_post(
+        session,
+        args.resource_type,
+        "/attached",
+        payload=resource_attachment_request(args.resource_id, file_id),
+    )
+    print_json(body)
+
+
+def cmd_resource_attach(args):
+    session = load_session()
+    command_label = f"datalore notebook {args.resource_type} attach"
+    require_resource_attachment_support(args.resource_type, "attach")
+    require_notebook_resource_session(session, command_label, NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE, "CREATE")
+    attachment_options = parse_attachment_options_argument(
+        getattr(args, "attachment_options_json", None),
+        "--attachment-options",
+    )
+    file_id = current_notebook_file_id(session, command_label, args.notebook_id)
+    payload = resource_attachment_request(args.resource_id, file_id, attachment_options)
+    resource_api_post(
+        session,
+        args.resource_type,
+        "/attach",
+        payload=payload,
+    )
+    result = {
+        "attached": True,
+        "resourceId": args.resource_id,
+        "fileId": file_id,
+    }
+    if attachment_options is not None:
+        result["attachmentOptions"] = attachment_options
+    if getattr(args, "json", False):
+        print_json(result)
+        return
+    print(
+        f"Attached {RESOURCE_TYPE_LABELS.get(args.resource_type, args.resource_type)} "
+        f"{args.resource_id} to {extract_vfs_id(file_id)}."
+    )
+
+
+def cmd_resource_update_attachment(args):
+    session = load_session()
+    command_label = f"datalore notebook {args.resource_type} update-attachment"
+    require_resource_attachment_support(args.resource_type, "update-attachment")
+    require_notebook_resource_session(session, command_label, NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE, "CREATE")
+    attachment_options = parse_attachment_options_argument(args.attachment_options_json, "--attachment-options")
+    file_id = current_notebook_file_id(session, command_label, args.notebook_id)
+    resource_api_post(
+        session,
+        args.resource_type,
+        "/update-attachment",
+        payload=resource_attachment_request(args.resource_id, file_id, attachment_options),
+    )
+    result = {
+        "updated": True,
+        "resourceId": args.resource_id,
+        "fileId": file_id,
+        "attachmentOptions": attachment_options,
+    }
+    if getattr(args, "json", False):
+        print_json(result)
+        return
+    print(
+        f"Updated attachment for {RESOURCE_TYPE_LABELS.get(args.resource_type, args.resource_type)} "
+        f"{args.resource_id} on {extract_vfs_id(file_id)}."
+    )
+
+
+def cmd_resource_detach(args):
+    session = load_session()
+    command_label = f"datalore notebook {args.resource_type} detach"
+    require_resource_attachment_support(args.resource_type, "detach")
+    require_notebook_resource_session(session, command_label, NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE, "CREATE")
+    file_id = current_notebook_file_id(session, command_label, args.notebook_id)
+    resource_api_post(
+        session,
+        args.resource_type,
+        "/detach",
+        payload=resource_attachment_request(args.resource_id, file_id),
+    )
+    result = {
+        "detached": True,
+        "resourceId": args.resource_id,
+        "fileId": file_id,
+    }
+    if getattr(args, "json", False):
+        print_json(result)
+        return
+    print(
+        f"Detached {RESOURCE_TYPE_LABELS.get(args.resource_type, args.resource_type)} "
+        f"{args.resource_id} from {extract_vfs_id(file_id)}."
+    )
+
+
+WORKSPACE_RESOURCE_COMMAND_MAP = {
+    "list": cmd_resource_list,
+    "get": cmd_resource_get,
+    "drivers": cmd_database_drivers,
+    "create": cmd_resource_create,
+    "update": cmd_resource_update,
+    "delete": cmd_resource_delete,
+    "search": cmd_resource_search,
+    "usage": cmd_resource_usage,
+    "clone": cmd_resource_clone,
+}
+
+NOTEBOOK_RESOURCE_COMMAND_MAP = {
+    "attached": cmd_resource_attached,
+    "get-attached": cmd_resource_get_attached,
+    "attach": cmd_resource_attach,
+    "update-attachment": cmd_resource_update_attachment,
+    "detach": cmd_resource_detach,
+}
+
 
 def main():
-    global VERBOSE
+    global NOTEBOOK_ID_OVERRIDE, WORKSPACE_ID_OVERRIDE, VERBOSE
+    preflight_keyring_access()
     parser = build_parser()
     args = parser.parse_args()
 
     VERBOSE = getattr(args, "verbose", False)
+    NOTEBOOK_ID_OVERRIDE = getattr(args, "notebook_id", None) if args.command == "notebook" else None
+    WORKSPACE_ID_OVERRIDE = getattr(args, "workspace_id", None) if args.command == "workspace" else None
 
     if not args.command:
         parser.print_help()
@@ -1952,71 +4392,144 @@ def main():
         COMMAND_MAP[args.command](args)
         return
 
-    if args.command == "files":
-        cmd_files(args)
-        return
-
-    # Two-level subcommands
-    if args.command == "cells":
-        if args.cells_command == "run":
-            cmd_cells_run(args)
-        else:
-            cmd_cells(args)
-        return
-
-    if args.command == "cell":
-        if not args.cell_command:
-            parser.parse_args(["cell", "--help"])
+    if args.command == "workspace":
+        if not args.workspace_command:
+            parser.parse_args(["workspace", "--help"])
             return
-        handler = CELL_COMMAND_MAP.get(args.cell_command)
+        if args.workspace_command == "database":
+            if not args.database_command:
+                parser.parse_args(["workspace", "database", "--help"])
+                return
+            handler = DATABASE_COMMAND_MAP.get(args.database_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown workspace database command: {args.database_command}")
+            return
+        if args.workspace_command in RESOURCE_API_PATHS:
+            if not args.resource_command:
+                parser.parse_args(["workspace", args.workspace_command, "--help"])
+                return
+            args.resource_type = args.workspace_command
+            handler = WORKSPACE_RESOURCE_COMMAND_MAP.get(args.resource_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown workspace {args.workspace_command} command: {args.resource_command}")
+            return
+        handler = WORKSPACE_COMMAND_MAP.get(args.workspace_command)
         if handler:
             handler(args)
         else:
-            sys.exit(f"Unknown cell command: {args.cell_command}")
+            sys.exit(f"Unknown workspace command: {args.workspace_command}")
         return
 
-    if args.command == "file":
-        if not args.file_command:
-            parser.parse_args(["file", "--help"])
+    if args.command == "notebook":
+        if not args.notebook_command:
+            parser.parse_args(["notebook", "--help"])
             return
-        handler = FILE_COMMAND_MAP.get(args.file_command)
-        if handler:
-            handler(args)
-        else:
-            sys.exit(f"Unknown file command: {args.file_command}")
-        return
-
-    if args.command == "db":
-        if not args.db_command:
-            parser.parse_args(["db", "--help"])
+        if args.notebook_command in RESOURCE_ATTACHMENT_CAPABILITIES:
+            if not args.notebook_resource_command:
+                parser.parse_args(["notebook", args.notebook_command, "--help"])
+                return
+            args.resource_type = args.notebook_command
+            handler = NOTEBOOK_RESOURCE_COMMAND_MAP.get(args.notebook_resource_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook {args.notebook_command} command: {args.notebook_resource_command}")
             return
-        handler = DB_COMMAND_MAP.get(args.db_command)
-        if handler:
-            handler(args)
-        else:
-            sys.exit(f"Unknown db command: {args.db_command}")
-        return
-
-    if args.command == "kernel":
-        if not args.kernel_command:
-            parser.parse_args(["kernel", "--help"])
+        if args.notebook_command == "files":
+            cmd_files(args)
             return
-        handler = KERNEL_COMMAND_MAP.get(args.kernel_command)
-        if handler:
-            handler(args)
-        else:
-            sys.exit(f"Unknown kernel command: {args.kernel_command}")
-        return
-
-    if args.command == "worksheet":
-        if not args.worksheet_command:
-            parser.parse_args(["worksheet", "--help"])
+        if args.notebook_command == "attached-databases":
+            cmd_attached_databases(args)
             return
-        handler = WORKSHEET_COMMAND_MAP.get(args.worksheet_command)
-        if handler:
-            handler(args)
-        else:
-            sys.exit(f"Unknown worksheet command: {args.worksheet_command}")
+        if args.notebook_command == "definitions":
+            cmd_definitions(args)
+            return
+        if args.notebook_command == "cells":
+            if args.cells_command == "run":
+                cmd_cells_run(args)
+            else:
+                cmd_cells(args)
+            return
+        if args.notebook_command == "cell":
+            if not args.cell_command:
+                parser.parse_args(["notebook", "cell", "--help"])
+                return
+            handler = CELL_COMMAND_MAP.get(args.cell_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook cell command: {args.cell_command}")
+            return
+        if args.notebook_command == "file":
+            if not args.file_command:
+                parser.parse_args(["notebook", "file", "--help"])
+                return
+            handler = FILE_COMMAND_MAP.get(args.file_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook file command: {args.file_command}")
+            return
+        if args.notebook_command == "db":
+            if not args.db_command:
+                parser.parse_args(["notebook", "db", "--help"])
+                return
+            handler = DB_COMMAND_MAP.get(args.db_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook db command: {args.db_command}")
+            return
+        if args.notebook_command == "kernel":
+            if not args.kernel_command:
+                parser.parse_args(["notebook", "kernel", "--help"])
+                return
+            handler = KERNEL_COMMAND_MAP.get(args.kernel_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook kernel command: {args.kernel_command}")
+            return
+        if args.notebook_command == "agent":
+            if not args.agent_command:
+                parser.parse_args(["notebook", "agent", "--help"])
+                return
+            handler = AGENT_COMMAND_MAP.get(args.agent_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook agent command: {args.agent_command}")
+            return
+        if args.notebook_command == "worksheet":
+            if not args.worksheet_command:
+                parser.parse_args(["notebook", "worksheet", "--help"])
+                return
+            handler = WORKSHEET_COMMAND_MAP.get(args.worksheet_command)
+            if handler:
+                handler(args)
+            else:
+                sys.exit(f"Unknown notebook worksheet command: {args.worksheet_command}")
+            return
+        if args.notebook_command == "report":
+            if not args.report_command:
+                parser.parse_args(["notebook", "report", "--help"])
+                return
+            if args.report_command == "get":
+                cmd_report_get(args)
+            elif args.report_command == "replace":
+                cmd_report_replace(args)
+            elif args.report_command == "upsert-cell":
+                cmd_report_upsert_cell(args)
+            elif args.report_command == "publish":
+                cmd_report_publish(args)
+            else:
+                cmd_report_operation(args)
+            return
+        sys.exit(f"Unknown notebook command: {args.notebook_command}")
         return
 
     sys.exit(f"Unknown command: {args.command}")

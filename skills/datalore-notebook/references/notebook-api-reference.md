@@ -8,28 +8,32 @@ Every request requires a `notebookId` object: `{"ownerId": "...", "id": "..."}` 
 
 ## Cell types
 
-| Type | `data` field | Notes |
-|------|-------------|-------|
-| `CODE` | `{"language": "python"}` | Languages: `python`, `kotlin`, `scala`, `sql`, `r` (default: `python`) |
-| `MARKDOWN` | `{}` | No additional data |
-| `SQL` | `{"databaseId": "...", "variableName": "..."}` | Native SQL against attached DB; result becomes a DataFrame |
-| `CONTROL` | `{"control": {...}}` | Interactive widgets — exactly one control per cell. See "Control cell payloads" below |
+| Type       | `data` field                                   | Notes                                                                                 |
+|------------|------------------------------------------------|---------------------------------------------------------------------------------------|
+| `CODE`     | `{"language": "python"}`                       | Languages: `python`, `kotlin`, `scala`, `sql`, `r` (default: `python`)                |
+| `MARKDOWN` | `{}`                                           | No additional data                                                                    |
+| `SQL`      | `{"databaseId": "...", "variableName": "..."}` | Native SQL against attached DB; result becomes a DataFrame                            |
+| `CONTROL`  | `{"control": {...}}`                           | Interactive widgets — exactly one control per cell. See "Control cell payloads" below |
 
 ## Control cell payloads
 
-For a `CONTROL` cell, `data.control` carries the widget definition. Every control has `label` (display text) and `variable` (the Python variable the kernel assigns when the cell runs). Each control has a `controlType` discriminator and type-specific fields:
+For a `CONTROL` cell, `data.control` carries the widget definition. Every control has `label` (display text) and `variable` (the Python variable the
+kernel assigns when the cell runs). Each control has a `controlType` discriminator and type-specific fields:
 
-| `controlType` | Type-specific fields |
-|---------------|----------------------|
-| `CHECKBOX`    | `value: boolean` |
-| `SLIDER`      | `value: string`, `min: string`, `max: string`, `step: string` (string-encoded numbers) |
-| `TEXT_INPUT`  | `value: string`, `multiline: boolean` |
-| `DATEPICKER`  | `startDate: string?` (ISO date), `endDate: string?`, `withRange: boolean` |
+| `controlType` | Type-specific fields                                                                                                          |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `CHECKBOX`    | `value: boolean`                                                                                                              |
+| `SLIDER`      | `value: string`, `min: string`, `max: string`, `step: string` (string-encoded numbers)                                        |
+| `TEXT_INPUT`  | `value: string`, `multiline: boolean`                                                                                         |
+| `DATEPICKER`  | `startDate: string?` (ISO date), `endDate: string?`, `withRange: boolean`                                                     |
 | `DROPDOWN`    | `items: string[]`, `selectedValue: string?`, `multiselect: boolean`, `selectedValues: string[]?`, `selectedVariable: string?` |
 
-**Static vs dynamic dropdown.** A dropdown is **dynamic** when `selectedVariable` is set to the name of a Python variable holding a list/collection — the kernel resolves the actual items from that variable at run time, and `variable` is assigned the element matching the user's selection. When `selectedVariable` is `null` (or omitted), the dropdown is **static** and the literal `items` array is used.
+**Static vs dynamic dropdown.** A dropdown is **dynamic** when `selectedVariable` is set to the name of a Python variable holding a list/collection —
+the kernel resolves the actual items from that variable at run time, and `variable` is assigned the element matching the user's selection. When
+`selectedVariable` is `null` (or omitted), the dropdown is **static** and the literal `items` array is used.
 
 Static single-select:
+
 ```json
 {"controlType": "DROPDOWN", "label": "Color", "variable": "color",
  "items": ["red", "green", "blue"], "selectedValue": "green",
@@ -37,6 +41,7 @@ Static single-select:
 ```
 
 Dynamic single-select (items sourced from `my_items` in the kernel):
+
 ```json
 {"controlType": "DROPDOWN", "label": "Fruit", "variable": "fruit",
  "items": [], "selectedValue": "banana",
@@ -44,9 +49,11 @@ Dynamic single-select (items sourced from `my_items` in the kernel):
  "selectedVariable": "my_items"}
 ```
 
-For a dynamic dropdown, define the source variable in a CODE cell that runs **before** the control cell; `selectedValue` / `selectedValues` should be elements present in that variable at run time.
+For a dynamic dropdown, define the source variable in a CODE cell that runs **before** the control cell; `selectedValue` / `selectedValues` should be
+elements present in that variable at run time.
 
-For multi-select, set `multiselect: true` and use `selectedValues` instead of `selectedValue`. Multi-select works for both static and dynamic dropdowns.
+For multi-select, set `multiselect: true` and use `selectedValues` instead of `selectedValue`. Multi-select works for both static and dynamic
+dropdowns.
 
 ## Output types
 
@@ -56,11 +63,15 @@ The `text` field is `null` for binary-only types like `PLOT`. Outputs longer tha
 
 ## Execution statuses
 
-All: `NONE`, `STARTED`, `WAITING`, `PROCESSING_OUTPUT`, `VALID`, `ERROR`, `WARNING`, `TIMEOUT`. Terminal states: `VALID`, `ERROR`, `WARNING`. Treat `WARNING` as success.
+All: `NONE`, `STARTED`, `WAITING`, `PROCESSING_OUTPUT`, `VALID`, `ERROR`, `WARNING`, `TIMEOUT`. Terminal states: `VALID`, `ERROR`, `WARNING`. Treat
+`WARNING` as success.
 
-`timeoutMs` is the server-side request wait window, not a total execution deadline. On `TIMEOUT`, the cell may still be running kernel-side; single-cell `--wait` commands keep polling until the CLI timeout, while `cells run` has no extra polling phase and exits 2 if the batch times out.
+`timeoutMs` is the server-side request wait window, not a total execution deadline. On `TIMEOUT`, the cell may still be running kernel-side;
+single-cell `--wait` commands keep polling until the CLI timeout, while `cells run` has no extra polling phase and exits 2 if the batch times out.
 
-CLI `--json` mode prints these API statuses as-is. When automating or debugging execution commands, use `executionStatus`, `runResult.executionStatus`, or each `results[].executionStatus` to distinguish successful notebook execution from `ERROR` or `TIMEOUT`; a zero process exit code only means the CLI command and HTTP request succeeded.
+CLI `--json` mode prints these API statuses as-is. When automating or debugging execution commands, use `executionStatus`,
+`runResult.executionStatus`, or each `results[].executionStatus` to distinguish successful notebook execution from `ERROR` or `TIMEOUT`; a zero
+process exit code only means the CLI command and HTTP request succeeded.
 
 ## Kernel states
 
@@ -166,6 +177,7 @@ would push the total past the cap, that cell's outputs are dropped (the outputs 
 
 Use `/cell/outputs` on a specific cell to retrieve outputs that were dropped.
 
+
 ---
 
 ## `POST /worksheet/create` — Create worksheet
@@ -174,11 +186,11 @@ Creates a new worksheet tab. The worksheet starts with one empty CODE cell in th
 
 **Request:**
 
-| Field            | Type    | Required | Description                                                                 |
-|------------------|---------|----------|-----------------------------------------------------------------------------|
-| `notebookId`     | object  | yes      | Notebook identifier                                                         |
-| `name`           | string  | no       | Worksheet name. If omitted, a unique `Sheet N` name is generated            |
-| `worksheetIndex` | integer | no       | Insert at this worksheet tab index. If omitted, appends to the end          |
+| Field            | Type    | Required | Description                                                        |
+|------------------|---------|----------|--------------------------------------------------------------------|
+| `notebookId`     | object  | yes      | Notebook identifier                                                |
+| `name`           | string  | no       | Worksheet name. If omitted, a unique `Sheet N` name is generated   |
+| `worksheetIndex` | integer | no       | Insert at this worksheet tab index. If omitted, appends to the end |
 
 **Response:**
 
@@ -195,16 +207,143 @@ Use `firstCellId` with `/cell/edit`, or as `beforeCellId` / `afterCellId` in `/c
 
 ---
 
+## `POST /report` — Get report layout
+
+Returns the notebook's report layout. `initialized` is `false` and `tabs` is empty when no report layout has been created.
+
+**Request:**
+
+```json
+{"notebookId": {"ownerId": "alice", "id": "notebook123"}}
+```
+
+**Response:**
+
+```json
+{
+  "initialized": true,
+  "tabs": [{
+    "tabId": "overview",
+    "name": "Overview",
+    "rows": [{
+      "rowId": "summary-row",
+      "cells": [{
+        "cellId": "kN3xQ7",
+        "column": 0,
+        "columnSpan": 24,
+        "verticalOffset": 0,
+        "showInput": true,
+        "showOutput": true
+      }]
+    }]
+  }]
+}
+```
+
+---
+
+## `POST /report/replace` — Replace report layout
+
+Atomically replaces the complete layout and returns its materialized form. `tabs: []` removes the report. New tabs and rows can omit their IDs; the
+server generates them. Every included `cellId` must identify an existing notebook cell.
+
+**Request:**
+
+```json
+{
+  "notebookId": {"ownerId": "alice", "id": "notebook123"},
+  "tabs": [{
+    "name": "Overview",
+    "rows": [{
+      "cells": [{"cellId": "kN3xQ7", "column": 0, "columnSpan": 48}]
+    }]
+  }]
+}
+```
+
+The layout fields are:
+
+| Field                     | Applies to | Default / constraints                                                                        |
+|---------------------------|------------|----------------------------------------------------------------------------------------------|
+| `tabId`, `rowId`          | tabs, rows | Optional on creation; stable IDs are returned by the API                                     |
+| `name`                    | tab        | Empty string by default                                                                      |
+| `cellId`                  | cell       | Required existing notebook-cell ID; may appear only once in the layout                       |
+| `column`                  | cell       | `0`; integer 0–44                                                                            |
+| `columnSpan`              | cell       | `48`; integer 4–48 and `column + columnSpan <= 48`                                           |
+| `verticalOffset`          | cell       | `0`; non-negative count of 20-pixel grid steps                                               |
+| `height`                  | cell       | Prefer omission for dynamic/content-sized height; fixed height must be at least 3 grid steps |
+| `inputHeight`             | cell       | Only for fixed height; integer from 2 through `height - 1`                                   |
+| `showInput`, `showOutput` | cell       | `true`                                                                                       |
+
+Fixed-height cells cannot overlap within a row. At most one dynamic-height cell is allowed per row, and it cannot be vertically offset.
+
+---
+
+## `POST /report/operations` — Apply report layout operations
+
+Applies ordered operations atomically and returns the materialized layout. Callers can supply IDs in `ADD_TAB` and `ADD_ROW` when a later operation in
+the same batch must refer to a newly created item.
+
+**Request:**
+
+```json
+{
+  "notebookId": {"ownerId": "alice", "id": "notebook123"},
+  "operations": [
+    {"type": "ADD_TAB", "tabId": "overview", "name": "Overview"},
+    {"type": "ADD_ROW", "tabId": "overview", "rowId": "summary-row"},
+    {"type": "UPSERT_CELL", "rowId": "summary-row", "cell": {"cellId": "kN3xQ7"}}
+  ]
+}
+```
+
+| `type`        | Required fields                        | Optional fields          |
+|---------------|----------------------------------------|--------------------------|
+| `ADD_TAB`     |                                        | `tabId`, `name`, `index` |
+| `RENAME_TAB`  | `tabId`, `name`                        |                          |
+| `MOVE_TAB`    | `tabId`, `index`                       |                          |
+| `REMOVE_TAB`  | `tabId`                                |                          |
+| `ADD_ROW`     | `tabId`                                | `rowId`, `index`         |
+| `MOVE_ROW`    | `rowId`, `tabId`, `index`              |                          |
+| `REMOVE_ROW`  | `rowId`                                |                          |
+| `UPSERT_CELL` | `rowId`, `cell` (a cell-layout object) |                          |
+| `REMOVE_CELL` | `cellId`                               |                          |
+
+Removing a tab or row also removes its cells. Upserting a cell that is already in the layout moves it to the target row. Removing a cell also removes
+its now-empty row.
+
+---
+
+## `POST /report/publish` — Create or update a report publication
+
+Publishes an initialized, non-empty report layout. `UPDATE` requires an existing publication of the selected type.
+
+| Field                    | Required | Description                                         |
+|--------------------------|----------|-----------------------------------------------------|
+| `type`                   | yes      | `STATIC` or `INTERACTIVE`                           |
+| `mode`                   | yes      | `CREATE` or `UPDATE`                                |
+| `fullWidth`              | no       | Defaults to `true`                                  |
+| `computationMode`        | no       | Interactive only: `REACTIVE` (default) or `JUPYTER` |
+| `canDownloadAndEditCopy` | no       | Defaults to `false`                                 |
+
+**Response:**
+
+```json
+{"reportId": "report123", "type": "INTERACTIVE", "mode": "CREATE"}
+```
+
+---
+
 ## `POST /cell` — Get cell
 
 Returns a single cell with execution status and outputs.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell ID |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+| `cellId`     | string | yes      | Cell ID             |
 
 **Response:**
 
@@ -236,10 +375,10 @@ Returns detailed execution outputs. Use for polling long-running cells.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell ID |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+| `cellId`     | string | yes      | Cell ID             |
 
 **Response:**
 
@@ -259,7 +398,8 @@ Returns detailed execution outputs. Use for polling long-running cells.
 }
 ```
 
-`stdout`, `stderr`, `errorTraceback` are truncated to 10,000 chars. Boolean flags `stdoutTruncated`, `stderrTruncated`, `errorTracebackTruncated` indicate when this happens.
+`stdout`, `stderr`, `errorTraceback` are truncated to 10,000 chars. Boolean flags `stdoutTruncated`, `stderrTruncated`, `errorTracebackTruncated`
+indicate when this happens.
 
 ---
 
@@ -269,16 +409,16 @@ Creates a new cell. Optionally runs it immediately.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellType` | string | yes | `CODE`, `MARKDOWN`, `SQL`, or `CONTROL` |
-| `source` | string | no | Cell source code (**not** `content`). Ignored for CONTROL cells |
-| `data` | object | no | Cell-type-specific data (see Cell types table above) |
-| `afterCellId` | string | no | Insert after this cell. If omitted, appends to end |
-| `beforeCellId` | string | no | Insert before this cell. Mutually exclusive with `afterCellId` |
-| `run` | boolean | no | Execute after creation |
-| `timeoutMs` | integer | no | Max wait for execution (default: 30000, max: 30000) |
+| Field          | Type    | Required | Description                                                     |
+|----------------|---------|----------|-----------------------------------------------------------------|
+| `notebookId`   | object  | yes      | Notebook identifier                                             |
+| `cellType`     | string  | yes      | `CODE`, `MARKDOWN`, `SQL`, or `CONTROL`                         |
+| `source`       | string  | no       | Cell source code (**not** `content`). Ignored for CONTROL cells |
+| `data`         | object  | no       | Cell-type-specific data (see Cell types table above)            |
+| `afterCellId`  | string  | no       | Insert after this cell. If omitted, appends to end              |
+| `beforeCellId` | string  | no       | Insert before this cell. Mutually exclusive with `afterCellId`  |
+| `run`          | boolean | no       | Execute after creation                                          |
+| `timeoutMs`    | integer | no       | Max wait for execution (default: 30000, max: 30000)             |
 
 **Response:**
 
@@ -311,14 +451,14 @@ Replaces cell source code. Optionally runs it.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell ID to edit |
-| `newContent` | string | yes | New source code (**not** `source`) |
-| `data` | object | no | SQL cell metadata only: `{"databaseId": "...", "variableName": "..."}`. Rejected with 400 for non-SQL cells |
-| `run` | boolean | no | Execute after editing |
-| `timeoutMs` | integer | no | Max wait for execution (default: 30000, max: 30000) |
+| Field        | Type    | Required | Description                                                                                                 |
+|--------------|---------|----------|-------------------------------------------------------------------------------------------------------------|
+| `notebookId` | object  | yes      | Notebook identifier                                                                                         |
+| `cellId`     | string  | yes      | Cell ID to edit                                                                                             |
+| `newContent` | string  | yes      | New source code (**not** `source`)                                                                          |
+| `data`       | object  | no       | SQL cell metadata only: `{"databaseId": "...", "variableName": "..."}`. Rejected with 400 for non-SQL cells |
+| `run`        | boolean | no       | Execute after editing                                                                                       |
+| `timeoutMs`  | integer | no       | Max wait for execution (default: 30000, max: 30000)                                                         |
 
 **Response:**
 
@@ -338,10 +478,10 @@ Permanently deletes a cell.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell ID to delete |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+| `cellId`     | string | yes      | Cell ID to delete   |
 
 **Response:** `204 No Content`
 
@@ -353,11 +493,11 @@ Executes a cell and waits for completion. Starts the kernel if needed.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell ID to execute |
-| `timeoutMs` | integer | no | Max wait in ms (default: 30000, max: 30000) |
+| Field        | Type    | Required | Description                                 |
+|--------------|---------|----------|---------------------------------------------|
+| `notebookId` | object  | yes      | Notebook identifier                         |
+| `cellId`     | string  | yes      | Cell ID to execute                          |
+| `timeoutMs`  | integer | no       | Max wait in ms (default: 30000, max: 30000) |
 
 **Response:** Same shape as `runResult` in create/edit responses:
 
@@ -427,13 +567,13 @@ Updates a control cell's widget value. The control type in the payload **must ma
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Control cell ID (must have exactly 1 control) |
-| `control` | object | yes | New control data (must match existing control type) |
-| `run` | boolean | no | Execute after updating |
-| `timeoutMs` | integer | no | Max wait for execution |
+| Field        | Type    | Required | Description                                         |
+|--------------|---------|----------|-----------------------------------------------------|
+| `notebookId` | object  | yes      | Notebook identifier                                 |
+| `cellId`     | string  | yes      | Control cell ID (must have exactly 1 control)       |
+| `control`    | object  | yes      | New control data (must match existing control type) |
+| `run`        | boolean | no       | Execute after updating                              |
+| `timeoutMs`  | integer | no       | Max wait for execution                              |
 
 **Response:** Same as edit — `{"cellId": "...", "applied": true, "runResult": ...}`
 
@@ -475,8 +615,8 @@ Sends an interrupt signal to the kernel. Stops whatever cell is currently runnin
 {"interrupted": true}
 ```
 
-`interrupted` is `true` when a cell was actively running at the moment of the call, `false` otherwise. The interrupted cell's next `/cell/outputs` poll
-will show `executionStatus: "ERROR"` with a `KeyboardInterrupt` traceback.
+`interrupted` is `true` when a cell was actively running at the moment of the call, `false` otherwise. The interrupted cell's next `/cell/outputs`
+poll will show `executionStatus: "ERROR"` with a `KeyboardInterrupt` traceback.
 
 **409 Conflict** with `{"error": "...", "state": "NOT_STARTED"}` if no session exists for the notebook — start the kernel via any `/cell/run` first.
 
@@ -513,18 +653,33 @@ a hard failure.
 
 ---
 
+## `POST /agent/stop` — Stop notebook agent
+
+Stops the notebook's computation and releases its agent. The operation is idempotent: it also succeeds when the notebook has no active session. The
+next cell execution starts a new agent and kernel with no variables or imports from the stopped process.
+
+**Request:**
+
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+
+**Response:** `204 No Content`
+
+---
+
 ## `POST /definitions` — Go to definition
 
 Finds where a symbol is defined. **Requires a running kernel** — run any cell first.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `cellId` | string | yes | Cell containing the symbol |
-| `line` | integer | yes | 1-based line number |
-| `column` | integer | yes | 1-based column number |
+| Field        | Type    | Required | Description                |
+|--------------|---------|----------|----------------------------|
+| `notebookId` | object  | yes      | Notebook identifier        |
+| `cellId`     | string  | yes      | Cell containing the symbol |
+| `line`       | integer | yes      | 1-based line number        |
+| `column`     | integer | yes      | 1-based column number      |
 
 **Response:**
 
@@ -536,15 +691,15 @@ When defined in an attached file: `cellId`/`line`/`column` are `null`, `filePath
 
 ---
 
-## `POST /databases` — List databases
+## `POST /databases` — List attached databases
 
 Lists all databases attached to the notebook.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
 
 **Response:**
 
@@ -571,17 +726,19 @@ Navigates the schema tree and returns children at a given path.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `databaseId` | string | yes | Database UUID from `/databases` |
-| `path` | string[] | no | Path to navigate into (default: `[]` = root) |
-| `depth` | integer | no | Levels of children to include (default: 1, max: 10) |
-| `verbosity` | string | no | `essential` (default), `standard`, or `full` |
+| Field        | Type     | Required | Description                                         |
+|--------------|----------|----------|-----------------------------------------------------|
+| `notebookId` | object   | yes      | Notebook identifier                                 |
+| `databaseId` | string   | yes      | Database UUID from `/databases`                     |
+| `path`       | string[] | no       | Path to navigate into (default: `[]` = root)        |
+| `depth`      | integer  | no       | Levels of children to include (default: 1, max: 10) |
+| `verbosity`  | string   | no       | `essential` (default), `standard`, or `full`        |
 
-**Schema tree structure:** Schema > Group > Object > Column. Groups are intermediate nodes like `"tables"`, `"views"`, `"routines"`. Path to a table: `["public", "tables", "users"]`.
+**Schema tree structure:** Schema > Group > Object > Column. Groups are intermediate nodes like `"tables"`, `"views"`, `"routines"`. Path to a table:
+`["public", "tables", "users"]`.
 
 **Verbosity levels:**
+
 - `essential`: TABLE, VIEW, SCHEMA, DATABASE, COLUMN, OTHER
 - `standard`: + ROUTINE, FUNCTION, PROCEDURE, SEQUENCE, TYPE, SYNONYM
 - `full`: all kinds (triggers, indexes, casts, etc.)
@@ -613,6 +770,7 @@ Group nodes (kind `OTHER`) and `kind: null` nodes are always included. Counts re
 `errors` is `null` when OK, a string message on partial introspection failures.
 
 **Strategy based on `descendantCount`:**
+
 - **< 100**: fetch full subtree with `depth: 5` in one call
 - **Large**: navigate incrementally with `depth: 1`, or use schema search
 
@@ -624,10 +782,10 @@ Returns the whole database schema as a compact text string intended for LLM/runt
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `databaseId` | string | yes | Database UUID from `/databases` |
+| Field        | Type   | Required | Description                     |
+|--------------|--------|----------|---------------------------------|
+| `notebookId` | object | yes      | Notebook identifier             |
+| `databaseId` | string | yes      | Database UUID from `/databases` |
 
 **Response:**
 
@@ -649,14 +807,14 @@ Searches for schema objects by name across the entire tree.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `databaseId` | string | yes | Database UUID |
-| `query` | string | yes | Case-insensitive substring match on node names |
-| `kinds` | string[] | no | Filter by kind (e.g. `["TABLE", "VIEW"]`). Omit to match all |
-| `limit` | integer | no | Max results (default: 50, max: 200) |
-| `verbosity` | string | no | `essential` (default), `standard`, or `full` |
+| Field        | Type     | Required | Description                                                  |
+|--------------|----------|----------|--------------------------------------------------------------|
+| `notebookId` | object   | yes      | Notebook identifier                                          |
+| `databaseId` | string   | yes      | Database UUID                                                |
+| `query`      | string   | yes      | Case-insensitive substring match on node names               |
+| `kinds`      | string[] | no       | Filter by kind (e.g. `["TABLE", "VIEW"]`). Omit to match all |
+| `limit`      | integer  | no       | Max results (default: 50, max: 200)                          |
+| `verbosity`  | string   | no       | `essential` (default), `standard`, or `full`                 |
 
 **Response:**
 
@@ -685,10 +843,10 @@ Lists files in a directory attached to the notebook.
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `directory` | string | no | Directory path (default: root). Example: `data/notebook_files` |
+| Field        | Type   | Required | Description                                                    |
+|--------------|--------|----------|----------------------------------------------------------------|
+| `notebookId` | object | yes      | Notebook identifier                                            |
+| `directory`  | string | no       | Directory path (default: root). Example: `data/notebook_files` |
 
 **Response:**
 
@@ -704,6 +862,7 @@ Lists files in a directory attached to the notebook.
 File types: `FILE`, `FOLDER`, `PRIVATE_FOLDER`, `PLACEHOLDER_PRIVATE_FOLDER`
 
 **File paths:** relative to notebook data root:
+
 - `data/notebook_files` — notebook files (also cwd for code cells, so `open('myfile.csv')` reads from here)
 - `data/workspace_files` — workspace-level files
 
@@ -715,10 +874,10 @@ Downloads a file as binary (`application/octet-stream`).
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `filePath` | string | yes | Full path, e.g. `data/notebook_files/data.csv` |
+| Field        | Type   | Required | Description                                    |
+|--------------|--------|----------|------------------------------------------------|
+| `notebookId` | object | yes      | Notebook identifier                            |
+| `filePath`   | string | yes      | Full path, e.g. `data/notebook_files/data.csv` |
 
 **Response:** Binary file content with `Content-Disposition: attachment` header.
 
@@ -730,11 +889,11 @@ Uploads a file. Uses **multipart form data with query parameters** (not a JSON b
 
 **Query parameters:**
 
-| Param | Required | Description |
-|-------|----------|-------------|
-| `ownerId` | yes | Owner ID from notebook ID |
-| `notebookId` | yes | Notebook internal ID |
-| `directory` | no | Target directory (default: root) |
+| Param        | Required | Description                      |
+|--------------|----------|----------------------------------|
+| `ownerId`    | yes      | Owner ID from notebook ID        |
+| `notebookId` | yes      | Notebook internal ID             |
+| `directory`  | no       | Target directory (default: root) |
 
 **Multipart field:** `file` — the file to upload.
 
@@ -760,10 +919,10 @@ response.raise_for_status()
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `filePath` | string | yes | Full path to file |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+| `filePath`   | string | yes      | Full path to file   |
 
 **Response:** `204 No Content`
 
@@ -773,10 +932,10 @@ response.raise_for_status()
 
 **Request:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `notebookId` | object | yes | Notebook identifier |
-| `filePath` | string | yes | Full path to file |
+| Field        | Type   | Required | Description         |
+|--------------|--------|----------|---------------------|
+| `notebookId` | object | yes      | Notebook identifier |
+| `filePath`   | string | yes      | Full path to file   |
 
 **Response:** `{"exists": true}`
 
