@@ -273,34 +273,55 @@ def preflight_keyring_access():
         )
 
 
-def credentials_key(host, scope, owner_id, notebook_id, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+def credential_origin(scheme, host):
+    if scheme not in ("http", "https"):
+        sys.exit(f"Unsupported credential origin scheme: {scheme}")
+    try:
+        parsed = urllib.parse.urlsplit(f"{scheme}://{host}")
+        port = parsed.port
+    except ValueError:
+        raise SystemExit(f"Invalid credential origin: {scheme}://{host}") from None
+    if (parsed.netloc != host or not parsed.hostname or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment or port == 0):
+        sys.exit(f"Invalid credential origin: {scheme}://{host}")
+    hostname = parsed.hostname.lower()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    default_port = 443 if scheme == "https" else 80
+    port_suffix = f":{port}" if port is not None and port != default_port else ""
+    return f"{scheme}://{hostname}{port_suffix}"
+
+
+def credentials_key(origin, scope, owner_id, notebook_id, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
+    if not origin.startswith(("http://", "https://")):
+        sys.exit("Credential key requires an origin with scheme and host.")
     if scope == NOTEBOOK_API_SCOPE:
-        return f"{host}/notebook/{owner_id}/{notebook_id}/api_token"
+        return f"{origin}/notebook/{owner_id}/{notebook_id}/api_token"
     if scope == NOTEBOOK_WITH_WORKSPACE_VIEW_SCOPE:
-        return f"{host}/notebook/{owner_id}/{notebook_id}/{scope}/api_token"
+        return f"{origin}/notebook/{owner_id}/{notebook_id}/{scope}/api_token"
     if scope in WORKSPACE_SCOPES:
         if not workspace_id:
             sys.exit(f"{scope} requires --workspace-id.")
-        return f"{host}/workspace/{workspace_id}/{scope}/{access}/api_token"
+        return f"{origin}/workspace/{workspace_id}/{scope}/{access}/api_token"
     if scope == USER_BASIC_SCOPE:
-        return f"{host}/user/{scope}/api_token"
+        return f"{origin}/user/{scope}/api_token"
     return sys.exit(f"Unsupported scope: {scope}")
 
 
-def notebook_credentials_key(host, owner_id, notebook_id):
-    return credentials_key(host, NOTEBOOK_API_SCOPE, owner_id, notebook_id)
+def notebook_credentials_key(origin, owner_id, notebook_id):
+    return credentials_key(origin, NOTEBOOK_API_SCOPE, owner_id, notebook_id)
 
 
-def load_user_basic_lookup_hint(host):
+def load_user_basic_lookup_hint(origin):
     session_path = Path(SESSION_FILE)
     if not session_path.exists():
         return None, None, None, None
     try:
-        _scheme, session_host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
+        scheme, session_host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
     except SystemExit:
         return None, None, None, None
-    if session_host != host:
+    if credential_origin(scheme, session_host) != origin:
         return None, None, None, None
     if scope in NOTEBOOK_SCOPES:
         return owner_id, notebook_id, None, None
@@ -309,13 +330,13 @@ def load_user_basic_lookup_hint(host):
     return None, None, None, None
 
 
-def credential_lookup_keys(host, owner_id, notebook_id, scope, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+def credential_lookup_keys(origin, owner_id, notebook_id, scope, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
-    candidate_keys = [credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)]
+    candidate_keys = [credentials_key(origin, scope, owner_id, notebook_id, workspace_id, access)]
 
     if scope in WORKSPACE_SCOPES:
         candidate_keys.extend(
-            credentials_key(host, scope, owner_id, notebook_id, workspace_id, candidate_access)
+            credentials_key(origin, scope, owner_id, notebook_id, workspace_id, candidate_access)
             for candidate_access in higher_or_equal_auth_accesses(access)[1:]
         )
     elif scope == USER_BASIC_SCOPE:
@@ -324,12 +345,12 @@ def credential_lookup_keys(host, owner_id, notebook_id, scope, workspace_id=None
         lookup_workspace_id = workspace_id
         lookup_access = access
         if not ((lookup_owner_id and lookup_notebook_id) or lookup_workspace_id):
-            lookup_owner_id, lookup_notebook_id, lookup_workspace_id, lookup_access = load_user_basic_lookup_hint(host)
+            lookup_owner_id, lookup_notebook_id, lookup_workspace_id, lookup_access = load_user_basic_lookup_hint(origin)
         if lookup_owner_id and lookup_notebook_id:
-            candidate_keys.append(credentials_key(host, NOTEBOOK_API_SCOPE, lookup_owner_id, lookup_notebook_id))
+            candidate_keys.append(credentials_key(origin, NOTEBOOK_API_SCOPE, lookup_owner_id, lookup_notebook_id))
         if lookup_workspace_id:
             candidate_keys.extend(
-                credentials_key(host, WORKSPACE_SCOPE, None, None, lookup_workspace_id, candidate_access)
+                credentials_key(origin, WORKSPACE_SCOPE, None, None, lookup_workspace_id, candidate_access)
                 for candidate_access in AUTH_ACCESS_ORDER
             )
 
@@ -378,14 +399,14 @@ def prompt_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, wo
     return api_token
 
 
-def save_credentials(host, owner_id, notebook_id, api_token, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+def save_credentials(origin, owner_id, notebook_id, api_token, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
     if get_env_api_token():
         print(f"\n  {ENV_API_TOKEN} is set; system keychain was not updated.\n")
         return
     keyring = require_keyring()
     try:
-        keyring.set_password(SERVICE, credentials_key(host, scope, owner_id, notebook_id, workspace_id, access), api_token)
+        keyring.set_password(SERVICE, credentials_key(origin, scope, owner_id, notebook_id, workspace_id, access), api_token)
     except Exception as e:
         fail_keychain("save", e)
     print("\n  Saved to system keychain.\n")
@@ -398,30 +419,30 @@ def get_keychain_password(keyring, key):
         fail_keychain("read", e)
 
 
-def cache_user_basic_credentials(keyring, host, credential):
+def cache_user_basic_credentials(keyring, origin, credential):
     try:
-        keyring.set_password(SERVICE, credentials_key(host, USER_BASIC_SCOPE, None, None), credential)
+        keyring.set_password(SERVICE, credentials_key(origin, USER_BASIC_SCOPE, None, None), credential)
     except Exception:
         return
 
 
-def get_keychain_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+def get_keychain_credentials(origin, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
     keyring = require_keyring()
-    exact_key = credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)
-    for candidate_key in credential_lookup_keys(host, owner_id, notebook_id, scope, workspace_id, access):
+    exact_key = credentials_key(origin, scope, owner_id, notebook_id, workspace_id, access)
+    for candidate_key in credential_lookup_keys(origin, owner_id, notebook_id, scope, workspace_id, access):
         credential = get_keychain_password(keyring, candidate_key)
         if credential:
             if scope == USER_BASIC_SCOPE and candidate_key != exact_key:
-                cache_user_basic_credentials(keyring, host, credential)
+                cache_user_basic_credentials(keyring, origin, credential)
             return credential
     return None
 
 
-def delete_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
+def delete_credentials(origin, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, workspace_id=None, access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
     keyring = require_keyring()
-    key = credentials_key(host, scope, owner_id, notebook_id, workspace_id, access)
+    key = credentials_key(origin, scope, owner_id, notebook_id, workspace_id, access)
     try:
         existing = keyring.get_password(SERVICE, key)
     except Exception as e:
@@ -438,7 +459,7 @@ def delete_credentials(host, owner_id, notebook_id, scope=NOTEBOOK_API_SCOPE, wo
     return True
 
 
-def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token=None, scope=NOTEBOOK_API_SCOPE, workspace_id=None,
+def resolve_credentials_for_init(scheme, host, owner_id, notebook_id, explicit_api_token=None, scope=NOTEBOOK_API_SCOPE, workspace_id=None,
                                  access=DEFAULT_AUTH_ACCESS):
     scope, access = normalize_scope_access(scope, access)
     if explicit_api_token is not None:
@@ -450,7 +471,7 @@ def resolve_credentials_for_init(host, owner_id, notebook_id, explicit_api_token
     if env_api_token:
         return env_api_token, False, False
 
-    api_token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
+    api_token = get_keychain_credentials(credential_origin(scheme, host), owner_id, notebook_id, scope, workspace_id, access)
     if api_token:
         return api_token, False, True
 
@@ -753,12 +774,13 @@ def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifie
             headers=agent_skill_headers(),
             data=payload,
             timeout=default_request_timeout(),
+            allow_redirects=False,
         )
     except requests.RequestException as e:
-        sys.exit(f"OAuth token exchange failed: {e}")
+        raise SystemExit(f"OAuth token exchange failed: {e}") from None
 
     body = parse_response_body(response)
-    if response.status_code >= 400:
+    if response.status_code >= 300:
         sys.exit(format_api_error("OAuth token exchange failed", response.status_code, body, response.headers))
     if not isinstance(body, dict):
         sys.exit(f"OAuth token exchange returned an unexpected response (HTTP {response.status_code}).")
@@ -954,7 +976,7 @@ def load_session():
 
     token = get_env_api_token()
     if not token:
-        token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
+        token = get_keychain_credentials(credential_origin(scheme, host), owner_id, notebook_id, scope, workspace_id, access)
     if not token:
         sys.exit(
             f"No credentials for the current session. Set {ENV_API_TOKEN} or run "
@@ -1256,6 +1278,7 @@ def api_request(
         "params": params,
         "timeout": timeout,
         "stream": raw,
+        "allow_redirects": False,
     }
     if payload is not None:
         request_kwargs["json"] = payload
@@ -1268,10 +1291,12 @@ def api_request(
         elif method == "GET":
             response = requests.get(url, **request_kwargs)
         else:
-            sys.exit(f"Unsupported API method: {method}")
+            raise SystemExit(f"Unsupported API method: {method}")
     except requests.RequestException as e:
         return 0, str(e), {}
 
+    if 300 <= response.status_code < 400:
+        sys.exit(f"Authenticated API request was redirected (HTTP {response.status_code}).")
     if raw and response.status_code < 400:
         return response.status_code, response, response.headers
 
@@ -1348,11 +1373,14 @@ def api_upload(session, endpoint, file_path, query_params, timeout=None):
                 params=query_params,
                 files={"file": (os.path.basename(file_path), f)},
                 timeout=timeout,
+                allow_redirects=False,
             )
     except requests.RequestException as e:
         sys.exit(f"Upload failed: {e}")
 
     body_text = response.text
+    if 300 <= response.status_code < 400:
+        sys.exit(f"Authenticated upload was redirected (HTTP {response.status_code}).")
     if response.status_code >= 400:
         sys.exit(format_api_error("Upload failed", response.status_code, parse_response_body(response), response.headers, session))
     try:
@@ -2188,6 +2216,7 @@ def cmd_init(args):
     if explicit_api_token is not None or get_env_api_token():
         require_scope_compatibility(scheme, host, scope)
         api_token, should_save_credentials, can_renew_keychain_token = resolve_credentials_for_init(
+            scheme,
             host,
             owner_id,
             notebook_id,
@@ -2210,7 +2239,7 @@ def cmd_init(args):
         )
         return
 
-    api_token = get_keychain_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
+    api_token = get_keychain_credentials(credential_origin(scheme, host), owner_id, notebook_id, scope, workspace_id, access)
     if api_token:
         initialize_session_with_saved_token(scheme, host, owner_id, notebook_id, scope, workspace_id, access, api_token)
         return
@@ -2227,7 +2256,7 @@ def cmd_logout(args):
         require_scope_workspace_id(scope, workspace_id)
     else:
         _scheme, host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
-    delete_credentials(host, owner_id, notebook_id, scope, workspace_id, access)
+    delete_credentials(credential_origin(_scheme, host), owner_id, notebook_id, scope, workspace_id, access)
     delete_session()
     print(f"Logged out from scope {scope} on {host}")
 
@@ -2269,7 +2298,7 @@ def initialize_session_with_token(
         sys.exit(format_api_error("API error", status, body, headers, session))
 
     if should_save_credentials:
-        save_credentials(host, owner_id, notebook_id, api_token, scope, workspace_id, access)
+        save_credentials(credential_origin(scheme, host), owner_id, notebook_id, api_token, scope, workspace_id, access)
 
     save_initialized_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
@@ -2333,7 +2362,7 @@ def initialize_session_with_oauth(scheme, host, owner_id, notebook_id, scope=NOT
         session = Session(host, owner_id, notebook_id, api_token, scheme, scope, workspace_id, access)
         sys.exit(format_api_error("API error", status, body, headers, session))
 
-    save_credentials(host, owner_id, notebook_id, api_token, scope, workspace_id, access)
+    save_credentials(credential_origin(scheme, host), owner_id, notebook_id, api_token, scope, workspace_id, access)
     save_initialized_session(scheme, host, owner_id, notebook_id, scope, workspace_id, access)
 
 
