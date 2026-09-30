@@ -67,6 +67,9 @@ If `DATALORE_API_TOKEN` is not set, `init` starts OAuth PKCE browser login and s
 `init` yourself from the task workspace and relay the printed browser URL if the browser does not open automatically. Do not ask the user to paste
 tokens into chat.
 
+Keychain credentials saved by older CLI versions without a URL scheme are not reused. Run `init` again to authorize and save a credential for the
+current origin (scheme, host, and port).
+
 Before initializing scopes added after Datalore 2026.2, the CLI reads `/api/agent/v1/version`, then calls `/api/agent/v1/validate_version` to validate
 compatibility. This preflight runs for supplied API tokens as well as OAuth. If the version endpoint is absent, it probes the existing public notebook
 API for legacy agent-skill version support. Workspace initialization also requires the API response's `X-Agent-Skill-Version` to exactly match the
