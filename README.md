@@ -41,7 +41,7 @@ The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed 
 For Datalore Cloud, install the latest skill version with `npx skills`:
 
 ```bash
-npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.2.2 --skill datalore-notebook --global
+npx skills add https://github.com/JetBrains/datalore-skills --skill datalore-notebook --global
 ```
 
 For Datalore On-Premises, install the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
@@ -57,7 +57,7 @@ This skill can be installed through the plugin marketplace.
 For Datalore Cloud, add the marketplace with the latest skill version:
 
 ```
-/plugin marketplace add https://github.com/JetBrains/datalore-skills.git#2026.2.2
+/plugin marketplace add https://github.com/JetBrains/datalore-skills.git
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
