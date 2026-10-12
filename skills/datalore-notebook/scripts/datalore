@@ -140,7 +140,7 @@ import requests
 # --------------------------------------------------------------------------- #
 
 SERVICE = "datalore-notebook"
-AGENT_SKILL_VERSION = "2026.3"
+AGENT_SKILL_VERSION = "2026.4"
 AGENT_SKILL_VERSION_HEADER = "X-Agent-Skill-Version"
 AGENT_SKILL_VERSION_MISMATCH_PROBLEM_TYPE = "urn:datalore:problem:agent-skill-version-mismatch"
 LEGACY_AGENT_SKILL_VERSION = "2026.2.2"
