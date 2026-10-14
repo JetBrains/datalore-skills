@@ -766,6 +766,7 @@ def exchange_oauth_code_for_token(scheme, host, code, redirect_uri, code_verifie
         "code_verifier": code_verifier,
     }
     safe_payload = dict(payload)
+    safe_payload["code"] = "***"
     safe_payload["code_verifier"] = "***"
     log_http_request("POST", url, json_body=safe_payload)
     try:
