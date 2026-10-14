@@ -611,6 +611,13 @@ def create_oauth_callback_server(expected_state):
             self.end_headers()
             self.wfile.write(body)
 
+        def log_request(self, code="-", size="-"):
+            # The default access log prints the raw request line, whose query carries the authorization code and state.
+            if isinstance(code, http.HTTPStatus):
+                code = code.value
+            path = urllib.parse.urlparse(getattr(self, "path", "")).path
+            self.log_message('"%s %s %s" %s %s', self.command, path, self.request_version, code, size)
+
         def log_message(self, _format, *_args):
             if VERBOSE:
                 super().log_message(_format, *_args)
