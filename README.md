@@ -44,10 +44,10 @@ For Datalore Cloud, install the latest skill version with `npx skills`:
 npx skills add https://github.com/JetBrains/datalore-skills --skill datalore-notebook --global
 ```
 
-For Datalore On-Premises, install the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
+For Datalore On-Premises, install the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.4`:
 
 ```bash
-npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.3 --skill datalore-notebook --global
+npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.4 --skill datalore-notebook --global
 ```
 
 #### Claude Plugin
@@ -61,10 +61,10 @@ For Datalore Cloud, add the marketplace with the latest skill version:
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
-For Datalore On-Premises, add the marketplace pinned to the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
+For Datalore On-Premises, add the marketplace pinned to the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.4`:
 
 ```
-/plugin marketplace add https://github.com/JetBrains/datalore-skills.git#2026.3
+/plugin marketplace add https://github.com/JetBrains/datalore-skills.git#2026.4
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
