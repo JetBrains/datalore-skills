@@ -1,6 +1,6 @@
 # Datalore skills for AI agents
 
-This repository contains official AI skills for working with JetBrains Datalore.
+This repository contains official AI skills for working with [JetBrains Datalore](https://datalore.jetbrains.com/).
 
 ## /datalore-notebook
 
@@ -11,40 +11,69 @@ These restrictions limit potential impact and reduce review effort.
 
 ### Supported versions
 
-The minimum required Datalore On-Premises version is 2026.2.
-The skill works in Datalore Cloud.
+- **Datalore Cloud**: use the latest skill version from the `main` branch. This is what the default install commands below install. Versioned branches are not intended for Datalore Cloud and may not work with it.
+- **Datalore On-Premises**: use the skill version matching the major version of your Datalore installation. Each major version has its own [branch](https://github.com/JetBrains/datalore-skills/branches) in this repository, for example, `2026.2` for Datalore 2026.2.x. Skill versions older than your Datalore installation may work, but this is not guaranteed. Skill versions newer than your Datalore installation are not supported. When you upgrade Datalore to a new major version, switch the skill to the matching branch.
+
+The minimum supported Datalore On-Premises version is 2026.2.
 
 ### Installation
 
 The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed on the machine.
 
-#### Claude
+#### Via [skills](https://github.com/vercel-labs/skills) to any supporting agent
+
+For Datalore Cloud, install the latest skill version from `main`:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -R skills/datalore-notebook ~/.claude/skills/
+npx skills add https://github.com/JetBrains/datalore-skills --skill datalore-notebook --global
 ```
 
-#### Codex or other tool respecting `.agents`
+For Datalore On-Premises, install from the branch matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.2`:
 
 ```bash
-mkdir -p ~/.agents/skills
-cp -R skills/datalore-notebook ~/.agents/skills/
+npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.2 --skill datalore-notebook --global
 ```
 
-### Authentication
+#### Claude Code plugin
 
-To work within a notebook, authenticate for it first.
+For Datalore Cloud, install the latest skill version from `main`:
 
-We recommend using per-notebook tokens with short expiration dates.
+```
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills
+```
 
-1. Open the notebook (let's say, it's `https://datalore.jetbrains.com/notebook/abcd/efgh`)
-2. Open a directory in your shell. It will contain the `.datalore-session` file.
-3. From that directory, run, depending on your installation path:
-   ```bash
-   ~/.claude/skills/datalore-notebook/scripts/datalore init https://datalore.jetbrains.com/notebook/abcd/efgh
-   # or
-   ~/.agents/skills/datalore-notebook/scripts/datalore init https://datalore.jetbrains.com/notebook/abcd/efgh
-   ```
-4. In the Datalore notebook UI, open "Tools > API Tokens", create a token, copy it, and paste it into the terminal.
-5. Open your AI agent interface, and prompt your request: for example, "In Datalore notebook https://datalore.jetbrains.com/notebook/abcd/efgh, analyze the attached csv file."
+For Datalore On-Premises, install from the branch matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.2`:
+
+```
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.2
+```
+
+On Claude Code versions earlier than 2.1.275, add the marketplace first, then install the plugin (for Datalore Cloud, omit `#2026.2`):
+
+```
+/plugin marketplace add JetBrains/datalore-skills#2026.2
+/plugin install datalore-skills@jetbrains-datalore
+```
+
+Claude Code prefixes plugin skills with the plugin name, so the skill's command is `/datalore-skills:datalore-notebook`. You usually don't need to type it: the agent picks up the skill when you mention a Datalore notebook URL (see [Usage](#usage)).
+
+To receive updates automatically, enable auto-update for the `jetbrains-datalore` marketplace in `/plugin` → **Marketplaces**. Otherwise, update manually with `claude plugin update datalore-skills@jetbrains-datalore`.
+
+When you upgrade Datalore On-Premises to a new major version, remove the marketplace and install the skill again from the matching branch:
+
+```
+/plugin marketplace remove jetbrains-datalore
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.3
+```
+
+### Usage
+
+Ask an agent to do something, mentioning a notebook URL. For example:
+
+- "In Datalore notebook https://datalore.jetbrains.com/notebook/qwerty/asdfgh analyze the attached csv"
+
+You will be asked in the browser to confirm access to the notebook. After confirmation, the token is stored in the system keychain and the session data in the `.datalore-session` file in the current directory. To delete the token from the keychain, ask the agent to log out of Datalore from the same directory.
+
+Instead of browser authorization, you can provide a token in the `DATALORE_API_TOKEN` environment variable.
+
+The token is scoped to the requested notebook.

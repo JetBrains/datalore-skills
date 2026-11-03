@@ -1,0 +1,15 @@
+{
+  "name": "jetbrains-datalore",
+  "description": "Official JetBrains Datalore skills for AI agents.",
+  "owner": {
+    "name": "JetBrains",
+    "url": "https://www.jetbrains.com/datalore/"
+  },
+  "plugins": [
+    {
+      "name": "datalore-skills",
+      "source": "./",
+      "description": "Work within a Datalore notebook: read, write, and execute cells, query attached databases, and manage notebook files."
+    }
+  ]
+}
