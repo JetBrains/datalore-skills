@@ -11,7 +11,7 @@ compatibility: >
   DATALORE_API_TOKEN, OAuth PKCE browser login, or notebook-scoped system keychain credentials via the bundled scripts/datalore CLI.
 metadata:
   author: JetBrains
-  version: 0.0.1
+  version: 2026.2
 ---
 
 # Datalore Notebook Agent
