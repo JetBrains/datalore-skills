@@ -28,7 +28,7 @@ Workspace access additionally has a level (read, create, or full), so the agent 
 - **Datalore Cloud**: use the latest skill version from the `main` branch. This is what the default install commands below install. Versioned branches are not intended for Datalore Cloud and may not work with it.
 - **Datalore On-Premises**: use the skill version matching the major version of your Datalore installation. Each major version has its own [branch](https://github.com/JetBrains/datalore-skills/branches) in this repository, for example, `2026.4` for Datalore 2026.4.x. Skill versions older than your Datalore installation may work, but this is not guaranteed. Skill versions newer than your Datalore installation are not supported. When you upgrade Datalore to a new major version, switch the skill to the matching branch.
 
-The minimum supported Datalore On-Premises version is 2026.2. For Datalore 2026.2, install version `2026.2.2` with `npx skills`. The Claude Code plugin is available starting from 2026.3.
+The minimum supported Datalore On-Premises version is 2026.2.
 
 ### Installation
 
