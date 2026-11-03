@@ -25,10 +25,8 @@ Workspace access additionally has a level (read, create, or full), so the agent 
 
 ### Supported versions
 
-Skill versions are published as [tags](https://github.com/JetBrains/datalore-skills/tags) of this repository.
-
-- **Datalore Cloud**: we recommend using the latest version of the skill. Older skill versions may not work with Datalore Cloud.
-- **Datalore On-Premises**: we recommend using the latest skill version with the same major version as your Datalore installation. For example, for Datalore 2026.3.x, use the latest 2026.3 skill version. Older skill versions may work with newer Datalore versions, but this is not guaranteed. Skill versions newer than your Datalore installation are not supported. When you upgrade Datalore to a new major version, update the skill as well.
+- **Datalore Cloud**: use the latest skill version from the `main` branch. This is what the default install commands below install. Versioned branches are not intended for Datalore Cloud and may not work with it.
+- **Datalore On-Premises**: use the skill version matching the major version of your Datalore installation. Each major version has its own [branch](https://github.com/JetBrains/datalore-skills/branches) in this repository, for example, `2026.3` for Datalore 2026.3.x. Skill versions older than your Datalore installation may work, but this is not guaranteed. Skill versions newer than your Datalore installation are not supported. When you upgrade Datalore to a new major version, switch the skill to the matching branch.
 
 The minimum supported Datalore On-Premises version is 2026.2.
 
@@ -38,34 +36,48 @@ The `datalore` script requires [uv](https://docs.astral.sh/uv/) to be installed 
 
 #### Via [skills](https://github.com/vercel-labs/skills) to any supporting agent
 
-For Datalore Cloud, install the latest skill version with `npx skills`:
+For Datalore Cloud, install the latest skill version from `main`:
 
 ```bash
 npx skills add https://github.com/JetBrains/datalore-skills --skill datalore-notebook --global
 ```
 
-For Datalore On-Premises, install the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
+For Datalore On-Premises, install from the branch matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
 
 ```bash
 npx skills add https://github.com/JetBrains/datalore-skills/tree/2026.3 --skill datalore-notebook --global
 ```
 
-#### Claude Plugin
+#### Claude Code plugin
 
-This skill can be installed through the plugin marketplace.
-
-For Datalore Cloud, add the marketplace with the latest skill version:
+For Datalore Cloud, install the latest skill version from `main`:
 
 ```
-/plugin marketplace add https://github.com/JetBrains/datalore-skills.git
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills
+```
+
+For Datalore On-Premises, install from the branch matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
+
+```
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.3
+```
+
+On Claude Code versions earlier than 2.1.275, add the marketplace first, then install the plugin (for Datalore Cloud, omit `#2026.3`):
+
+```
+/plugin marketplace add JetBrains/datalore-skills#2026.3
 /plugin install datalore-skills@jetbrains-datalore
 ```
 
-For Datalore On-Premises, add the marketplace pinned to the skill version matching your Datalore major version (see [Supported versions](#supported-versions)), for example, `2026.3`:
+Claude Code prefixes plugin skills with the plugin name, so the skill's command is `/datalore-skills:datalore-notebook`. You usually don't need to type it: the agent picks up the skill when you mention a Datalore notebook or workspace URL (see [Usage](#usage)).
+
+To receive updates automatically, enable auto-update for the `jetbrains-datalore` marketplace in `/plugin` → **Marketplaces**. Otherwise, update manually with `claude plugin update datalore-skills@jetbrains-datalore`.
+
+When you upgrade Datalore On-Premises to a new major version, remove the marketplace and install the skill again from the matching branch:
 
 ```
-/plugin marketplace add https://github.com/JetBrains/datalore-skills.git#2026.3
-/plugin install datalore-skills@jetbrains-datalore
+/plugin marketplace remove jetbrains-datalore
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.4
 ```
 
 ### Usage
@@ -76,7 +88,7 @@ Ask an agent to do something, mentioning a notebook or workspace URL. For exampl
 - "In Datalore workspace https://datalore.jetbrains.com/qwerty/asdfgh/notebooks create a notebook that queries the orders database"
 - "List my workspaces on https://datalore.jetbrains.com"
 
-You will be asked in the browser to confirm access to the notebook or workspace. After confirmation, the token is stored in the system keychain and the session data in the `.datalore-session` file in the current directory. Run `datalore logout` from the same directory to delete the token from the keychain.
+You will be asked in the browser to confirm access to the notebook or workspace. After confirmation, the token is stored in the system keychain and the session data in the `.datalore-session` file in the current directory. To delete the token from the keychain, ask the agent to log out of Datalore from the same directory.
 
 Instead of browser authorization, you can provide a token in the `DATALORE_API_TOKEN` environment variable.
 
