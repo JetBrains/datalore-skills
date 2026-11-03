@@ -73,11 +73,11 @@ Claude Code prefixes plugin skills with the plugin name, so the skill's command 
 
 To receive updates automatically, enable auto-update for the `jetbrains-datalore` marketplace in `/plugin` → **Marketplaces**. Otherwise, update manually with `claude plugin update datalore-skills@jetbrains-datalore`.
 
-When you upgrade Datalore On-Premises to a new major version, remove the marketplace and install the skill again from the matching branch:
+When you upgrade Datalore On-Premises to 2026.3 from an earlier major version, remove the marketplace pinned to the previous branch and install the skill from the `2026.3` branch:
 
 ```
 /plugin marketplace remove jetbrains-datalore
-/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.4
+/plugin install datalore-skills --marketplace JetBrains/datalore-skills#2026.3
 ```
 
 ### Usage
