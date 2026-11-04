@@ -147,6 +147,9 @@ LEGACY_AGENT_SKILL_VERSION = "2026.2.2"
 KEYRING_ACCESS_PROBE_KEY = "__keyring_access_probe__"
 SESSION_FILE = ".datalore-session"
 ENV_API_TOKEN = "DATALORE_API_TOKEN"
+# Set together with DATALORE_API_TOKEN by hosts that manage access themselves, such as the Datalore AI agent.
+ENV_URL = "DATALORE_URL"
+ENV_WORKSPACE_ID = "DATALORE_WORKSPACE_ID"
 TERMINAL_STATUSES = {"VALID", "ERROR", "WARNING"}
 CREATE_RUNNABLE_CELL_TYPES = {"CODE", "SQL", "CONTROL"}
 EDIT_RUNNABLE_CELL_TYPES = {"CODE", "SQL"}
@@ -241,6 +244,11 @@ def reject_api_token_stdin_env_conflict():
         f"--api-token-stdin cannot be used while {ENV_API_TOKEN} is set. "
         f"Unset {ENV_API_TOKEN} first so the CLI can use and save the token from stdin."
     )
+
+
+def reject_env_session_command():
+    if is_env_session():
+        sys.exit(f"This session is configured by {ENV_URL} and {ENV_API_TOKEN}; init and logout are not available.")
 
 
 def exception_summary(error):
@@ -585,6 +593,7 @@ def oauth_callback_page(result):
 
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<link rel=\"icon\" href=\"data:,\">"
         f"<title>{html.escape(title)}</title>"
         "<style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;margin:48px;line-height:1.4;color:#1f2328}"
         "main{max-width:560px}h1{font-size:24px;margin:0 0 12px}</style></head>"
@@ -910,8 +919,24 @@ def delete_session():
     return True
 
 
+def is_env_session():
+    return bool(os.environ.get(ENV_URL, "").strip() and get_env_api_token())
+
+
 def load_session_identity():
-    """Load session identity from .datalore-session without resolving credentials."""
+    """Load session identity from the environment or .datalore-session without resolving credentials."""
+    # The environment wins over .datalore-session: the session file lives in a directory the agent can write, so a forged
+    # file must not redirect the token to another host.
+    if is_env_session():
+        url = os.environ[ENV_URL].strip()
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            sys.exit(f"{ENV_URL} must be an absolute http(s) URL, got: {url}")
+        workspace_id = os.environ.get(ENV_WORKSPACE_ID, "").strip()
+        if not workspace_id:
+            sys.exit(f"{ENV_WORKSPACE_ID} must be set together with {ENV_URL} and {ENV_API_TOKEN}.")
+        parse_slash_id(workspace_id, ENV_WORKSPACE_ID)
+        return parsed.scheme, parsed.netloc, None, None, WORKSPACE_SCOPE, workspace_id, DEFAULT_AUTH_ACCESS
     path = Path(SESSION_FILE)
     if not path.exists():
         sys.exit(f"No {SESSION_FILE} found. Run `datalore init <url> [--scope <scope>]` first.")
@@ -979,7 +1004,7 @@ def load_session_identity():
 
 
 def load_session():
-    """Load session from .datalore-session and resolve credentials."""
+    """Load session from the environment or .datalore-session and resolve credentials."""
     scheme, host, owner_id, notebook_id, scope, workspace_id, access = load_session_identity()
 
     token = get_env_api_token()
@@ -1155,6 +1180,12 @@ def authorization_target_url_for_scope(oauth_scope, session=None):
 
 
 def authorization_flow_hint(required_scope, required_access=None, session=None):
+    if is_env_session():
+        return (
+            f"The server requires scope {required_scope}"
+            f"{f' with {auth_access_display(required_access)} access' if required_access else ''}. "
+            "This session can't get more access by itself; it has to be granted to it."
+        )
     oauth_scope = SERVER_SCOPE_TO_OAUTH_SCOPE.get(required_scope)
     if oauth_scope is None:
         return f"The server requires scope {required_scope}, which this CLI cannot authorize automatically."
@@ -1180,6 +1211,8 @@ def format_api_error(prefix, status, body, headers=None, session=None):
     message = body_error_message(body)
     if status == 401:
         detail = f": {message}" if message else ""
+        if is_env_session():
+            return f"{prefix}: authentication failed (HTTP {status}){detail}"
         return (
             f"{prefix}: authentication failed (HTTP {status}){detail}\n"
             f"The Datalore API token is missing, invalid, or expired. "
@@ -2206,6 +2239,7 @@ def notebook_context_for_scope(scope, notebook_id, owner_id, internal_id):
 
 
 def cmd_init(args):
+    reject_env_session_command()
     scope = getattr(args, "scope", NOTEBOOK_API_SCOPE)
     access = parse_auth_access(getattr(args, "access", DEFAULT_AUTH_ACCESS.lower()))
     scheme, host, owner_id, notebook_id, parsed_workspace_id = parse_target_url(args.url, scope)
@@ -2256,6 +2290,7 @@ def cmd_init(args):
 
 
 def cmd_logout(args):
+    reject_env_session_command()
     if args.url:
         scope = getattr(args, "scope", NOTEBOOK_API_SCOPE)
         access = parse_auth_access(getattr(args, "access", DEFAULT_AUTH_ACCESS.lower()))
@@ -4412,7 +4447,8 @@ NOTEBOOK_RESOURCE_COMMAND_MAP = {
 
 def main():
     global NOTEBOOK_ID_OVERRIDE, WORKSPACE_ID_OVERRIDE, VERBOSE
-    preflight_keyring_access()
+    if not get_env_api_token():
+        preflight_keyring_access()
     parser = build_parser()
     args = parser.parse_args()
 
