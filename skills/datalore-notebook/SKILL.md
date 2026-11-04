@@ -20,9 +20,11 @@ wraps the public notebook/user/workspace APIs, stores session context in `.datal
 otherwise system keychain credentials saved per scope. When no valid credential is available, `init` starts OAuth PKCE browser login and saves the
 resulting credentials.
 
-Run every CLI command with host execution (outside the sandbox) on the first attempt, including `--help` and commands using `DATALORE_API_TOKEN`. The
-CLI performs a read-only system-keychain probe at startup and cannot run without keychain access. Do not set `UV_CACHE_DIR` or retry inside the
-sandbox; request host execution for the same command instead.
+Run every CLI command with host execution (outside the sandbox) on the first attempt, including `--help` and commands using `DATALORE_API_TOKEN`.
+Unless `DATALORE_API_TOKEN` is set, the CLI performs a read-only system-keychain probe at startup and cannot run without keychain access. Do not set
+`UV_CACHE_DIR` or retry inside the sandbox; request host execution for the same command instead.
+
+When `DATALORE_URL` is set together with `DATALORE_API_TOKEN`, the session comes from the environment and `init` and `logout` are not available.
 
 ## Mandatory tool routing
 
@@ -50,7 +52,7 @@ Initialize from the workspace where the agent will work on this notebook. The CL
 `init` from the installed skill directory unless that is intentionally the session workspace.
 
 ```bash
-# The token avoids credential reads/writes after the mandatory startup keychain probe.
+# With the token set, the CLI skips the startup keychain probe and uses no saved credentials.
 export DATALORE_API_TOKEN="<token>"
 
 cd <task-workspace>

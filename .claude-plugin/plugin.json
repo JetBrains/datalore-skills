@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "datalore-skills",
   "description": "Official JetBrains Datalore skills for AI agents. Work within a Datalore notebook: read, write, and execute cells, query attached databases, and manage notebook files.",
-  "version": "2026.4",
+  "version": "2026.4+a9a0ef956634",
   "author": {
     "name": "JetBrains",
     "url": "https://www.jetbrains.com/datalore/"
